@@ -13,11 +13,17 @@ College_Social_Media_DB/
 			__init__.py
 			bplustree.py
 			bruteforce.py
+			table.py
+			db_manager.py
 			performance.py
 			run_performance_tests.py
 			visualizations_generator.py
 			performance_results_jpgs/
 			visualizations/
+	Module_B/
+		app/
+		sql/
+		requirements.txt
 ```
 
 ## Setup
@@ -47,6 +53,7 @@ This runs performance testing for different random key set sizes and generates:
 - SubTask 2: PerformanceAnalyzer for timing and memory comparison
 - SubTask 3: Graphviz visualization for tree structure and leaf links
 - SubTask 4: Performance testing across different random key set sizes with Matplotlib plots
+- Additional Layer: In-memory table/database manager API built on top of B+ Tree index
 
 ## B+ Tree Implementation (SubTask 1)
 
@@ -83,3 +90,48 @@ This runs performance testing for different random key set sizes and generates:
 - Generated files include:
 	- JPG charts: performance_insert.jpg, performance_search.jpg, performance_delete.jpg, performance_range_query.jpg, performance_random_workload.jpg, performance_memory_usage.jpg, performance_combined_comparison.jpg, performance_speedup_ratio.jpg
 	- Benchmark data: benchmark_results.json
+
+## Table and DB Manager Layer (Additional)
+
+- Implemented in:
+	- Module_A/database/table.py
+	- Module_A/database/db_manager.py
+- Purpose:
+	- Provide a simple DBMS-style API over the B+ Tree index.
+	- Manage multiple in-memory tables cleanly.
+
+### Features
+
+- Table API:
+	- insert(row), upsert(row), get(key), update(key, updates), delete(key)
+	- range_query(start_key, end_key), all_rows(), count(), truncate()
+- DBManager API:
+	- create_table(name, ...), get_table(name), drop_table(name)
+	- list_tables(), has_table(name)
+
+### Quick Usage
+
+```python
+from Module_A.database import DBManager
+
+db = DBManager()
+members = db.create_table(
+    name="members",
+    primary_key="id",
+    schema=["id", "name", "dept"],
+    bplustree_order=4,
+)
+
+members.insert({"id": 1, "name": "Alice", "dept": "CSE"})
+members.upsert({"id": 2, "name": "Bob", "dept": "ECE"})
+members.update(1, {"dept": "AIML"})
+
+print(members.get(1))
+print(members.range_query(1, 10))
+print(db.list_tables())
+```
+
+### Notes
+
+- Primary key type is integer (`int`) to match B+ Tree indexing.
+- This layer is in-memory only (no persistence yet).
