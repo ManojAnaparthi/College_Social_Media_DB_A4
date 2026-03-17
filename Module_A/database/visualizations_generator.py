@@ -26,10 +26,8 @@ class PerformanceVisualizer:
         self.jpg_output_dir.mkdir(parents=True, exist_ok=True)
 
     def _save_figure(self, fig: Figure, base_name: str) -> None:
-        """Save each chart as both PNG and JPG outputs."""
-        png_path = self.output_dir / f"{base_name}.png"
+        """Save each chart as JPG in the dedicated performance results folder."""
         jpg_path = self.jpg_output_dir / f"{base_name}.jpg"
-        fig.savefig(png_path, dpi=300, bbox_inches='tight')
         fig.savefig(jpg_path, dpi=300, bbox_inches='tight')
 
     def visualize_benchmarks(self, benchmark_results: Dict[str, Any]) -> None:
@@ -79,7 +77,7 @@ class PerformanceVisualizer:
             bplus_delete, brute_delete, bplus_range, brute_range
         )
 
-        print(f"[OK] Visualizations saved to {self.output_dir}")
+        print(f"[OK] JPG visualizations saved to {self.jpg_output_dir}")
 
     def _plot_operation(self, operation: str, sizes: List[int], bplus_times: List[float], brute_times: List[float]) -> None:
         """Create a comparison plot for a single operation."""

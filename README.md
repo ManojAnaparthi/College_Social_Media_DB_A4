@@ -8,13 +8,15 @@ College_Social_Media_DB/
 	README.md
 	Module_A/
 		requirements.txt
-		run_performance_tests.py
+		report.ipynb
 		database/
 			__init__.py
 			bplustree.py
 			bruteforce.py
 			performance.py
+			run_performance_tests.py
 			visualizations_generator.py
+			performance_results_jpgs/
 			visualizations/
 ```
 
@@ -31,12 +33,13 @@ Install dependencies from project root:
 From project root:
 
 ```bash
-.venv\Scripts\python.exe Module_A/run_performance_tests.py
+.venv\Scripts\python.exe Module_A/database/run_performance_tests.py
 ```
 
-This runs performance testing for different random key set sizes and generates plots in:
+This runs performance testing for different random key set sizes and generates:
 
-`Module_A/database/visualizations/`
+- Performance charts in `Module_A/database/performance_results_jpgs/`
+- Benchmark JSON in `Module_A/database/visualizations/benchmark_results.json`
 
 ## What Is Implemented
 
@@ -66,13 +69,17 @@ This runs performance testing for different random key set sizes and generates p
 - Main method: BPlusTree.visualize_tree()
 - Helper methods: _add_nodes() and _add_edges()
 - Current output folder for visualization files: Module_A/database/visualizations/
-- Existing generated file: Module_A/database/visualizations/bplustree_demo.png
+- Existing generated files: Module_A/database/visualizations/bplustree_demo.png, Module_A/database/visualizations/bplustree_demo_large.png
 
 ## Performance Testing Implementation (SubTask 4)
 
 - Implemented in: Module_A/database/visualizations_generator.py
 - Main function: run_full_performance_analysis()
 - Benchmarks used from: Module_A/database/performance.py (PerformanceAnalyzer)
-- Run file: Module_A/run_performance_tests.py
-- Output folder for generated plots: Module_A/database/visualizations/
-- Generated files include: performance_insert.png, performance_search.png, performance_delete.png, performance_range_query.png, performance_memory_usage.png, performance_combined_comparison.png, performance_speedup_ratio.png, benchmark_results.json
+- Run file: Module_A/database/run_performance_tests.py
+- Output folders for generated artifacts:
+	- Module_A/database/performance_results_jpgs/
+	- Module_A/database/visualizations/
+- Generated files include:
+	- JPG charts: performance_insert.jpg, performance_search.jpg, performance_delete.jpg, performance_range_query.jpg, performance_random_workload.jpg, performance_memory_usage.jpg, performance_combined_comparison.jpg, performance_speedup_ratio.jpg
+	- Benchmark data: benchmark_results.json
