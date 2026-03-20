@@ -3,10 +3,9 @@
 ## Folder Structure
 
 ```text
-DB_A2/
+College_Social_Media_DB/
 |-- .gitignore
 |-- README.md
-|-- csmdb_venv/
 |-- Module_A/
 |   |-- requirements.txt
 |   |-- report.ipynb
@@ -37,7 +36,6 @@ DB_A2/
     |-- sql/
     |   |-- schema.sql
     |   `-- sample_data.sql
-    `-- logs/
 ```
 
 ## Setup
@@ -45,18 +43,30 @@ DB_A2/
 Install dependencies from project root:
 
 ```bash
-.venv\Scripts\python.exe -m pip install -r Module_A/requirements.txt
+python -m pip install -r Module_A/requirements.txt
 ```
+
+If you use Conda, run with your Conda Python interpreter instead of `python3` from Windows app aliases.
 
 ## Run Performance Tests
 
 From project root:
 
 ```bash
-.venv\Scripts\python.exe Module_A/database/run_performance_tests.py
+python Module_A/database/run_performance_tests.py
+```
+
+Alternative (from Module_A/database folder):
+
+```bash
+python run_performance_tests.py
 ```
 
 This runs performance testing for different random key set sizes and generates:
+
+- Sampling strategy used in `run_performance_tests.py`:
+  - dense at smaller sizes: `range(100, 10100, 1000)`
+  - coarser at larger sizes: `range(10100, 100001, 10000)`
 
 - Performance charts in `Module_A/database/performance_results_jpgs/`
 - Benchmark JSON in `Module_A/database/visualizations/benchmark_results.json`
@@ -119,6 +129,8 @@ This runs performance testing for different random key set sizes and generates:
 - Table API:
   - insert(row), upsert(row), get(key), update(key, updates), delete(key)
   - range_query(start_key, end_key), all_rows(), count(), truncate()
+  - select(predicate=None, columns=None, limit=None)
+  - aggregate(operation, column=None, predicate=None) for count/sum/min/max/avg
 - DBManager API:
   - create_table(name, ...), get_table(name), drop_table(name)
   - list_tables(), has_table(name)
@@ -178,7 +190,6 @@ Module_B/
 |-- sql/
 |   |-- schema.sql           # Core + project table schema with FK constraints
 |   `-- sample_data.sql      # Demo dataset
-`-- logs/
 ```
 
 ### Setup (Module B)
@@ -212,8 +223,8 @@ uvicorn main:app --reload --port 8001
 Implemented:
 
 - Core identity/auth separation:
-	- `Member` table stores profile/core member data.
-	- `AuthCredential` stores login credentials (linked 1:1 to `Member`).
+  - `Member` table stores profile/core member data.
+  - `AuthCredential` stores login credentials (linked 1:1 to `Member`).
 - Project-specific tables (`Post`, `Comment`, `Follow`, `GroupMember`, etc.) are separated from credential storage.
 - Referential integrity is enforced through foreign keys with cascades.
 - Schema includes business-rule triggers and consistency constraints.
@@ -221,32 +232,32 @@ Implemented:
 Evidence in code:
 
 - `Module_B/sql/schema.sql`:
-	- `CREATE TABLE Member`
-	- `CREATE TABLE AuthCredential` with `FOREIGN KEY (MemberID) REFERENCES Member(MemberID) ON DELETE CASCADE`
-	- Project tables with `FOREIGN KEY ... ON DELETE CASCADE`
+  - `CREATE TABLE Member`
+  - `CREATE TABLE AuthCredential` with `FOREIGN KEY (MemberID) REFERENCES Member(MemberID) ON DELETE CASCADE`
+  - Project tables with `FOREIGN KEY ... ON DELETE CASCADE`
 
 ### SubTask 2: API and UI Development
 
 Implemented APIs (session-aware):
 
 - Auth/session:
-	- `POST /login`
-	- `GET /isAuth`
-	- `POST /logout`
+  - `POST /login`
+  - `GET /isAuth`
+  - `POST /logout`
 - Portfolio:
-	- `GET /portfolio/{member_id}`
-	- `PUT /portfolio/{member_id}`
+  - `GET /portfolio/{member_id}`
+  - `PUT /portfolio/{member_id}`
 - Project table CRUD (`Post`):
-	- `POST /posts`
-	- `GET /posts`
-	- `GET /posts/{post_id}`
-	- `PUT /posts/{post_id}`
-	- `DELETE /posts/{post_id}`
+  - `POST /posts`
+  - `GET /posts`
+  - `GET /posts/{post_id}`
+  - `PUT /posts/{post_id}`
+  - `DELETE /posts/{post_id}`
 - Additional project CRUD (`Comment`):
-	- `POST /posts/{post_id}/comments`
-	- `GET /posts/{post_id}/comments`
-	- `PUT /comments/{comment_id}`
-	- `DELETE /comments/{comment_id}`
+  - `POST /posts/{post_id}/comments`
+  - `GET /posts/{post_id}/comments`
+  - `PUT /comments/{comment_id}`
+  - `DELETE /comments/{comment_id}`
 
 Implemented web UI pages:
 
@@ -264,19 +275,19 @@ Member Portfolio access restriction behavior:
 
 - Only authenticated users can access portfolio pages/endpoints.
 - Users can view:
-	- their own profile
-	- admin-authorized profiles
-	- profiles permitted by access rule logic in backend
+  - their own profile
+  - admin-authorized profiles
+  - profiles permitted by access rule logic in backend
 - Unauthorized profile requests return permission errors and are shown clearly in UI.
 
 ### Requirement-to-Implementation Mapping
 
 - "Develop web-based UI and local APIs for CRUD on project-specific tables":
-	- Done via Post and Comment API endpoints + dedicated UI pages.
+  - Done via Post and Comment API endpoints + dedicated UI pages.
 - "Ensure every API call validates user session via local auth":
-	- Done for protected business endpoints through token validation dependency.
+  - Done for protected business endpoints through token validation dependency.
 - "Member Portfolio with authenticated and permission-restricted viewing":
-	- Done via portfolio endpoints and UI lookup workflow with backend authorization checks.
+  - Done via portfolio endpoints and UI lookup workflow with backend authorization checks.
 
 ### Notes for Demo
 
