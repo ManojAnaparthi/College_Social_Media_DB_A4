@@ -1,0 +1,154 @@
+{
+  "db_config": {
+    "host": "localhost",
+    "user": "root",
+    "database": "college_social_media"
+  },
+  "benchmark_params": {
+    "iterations": 40,
+    "warmup": 5,
+    "limit": 20,
+    "offset": 1511,
+    "comment_post_id": 3022
+  },
+  "stages": [
+    {
+      "stage": "before_indexes",
+      "indexes_enabled": false,
+      "sql_ms": {
+        "list_posts": {
+          "avg_ms": 1.86,
+          "p95_ms": 2.066,
+          "min_ms": 1.581,
+          "max_ms": 2.13
+        },
+        "list_comments": {
+          "avg_ms": 24.035,
+          "p95_ms": 26.077,
+          "min_ms": 20.447,
+          "max_ms": 26.489
+        }
+      },
+      "api_ms": {
+        "list_posts": {
+          "avg_ms": 7.437,
+          "p95_ms": 8.341,
+          "min_ms": 4.847,
+          "max_ms": 8.417
+        },
+        "list_comments": {
+          "avg_ms": 55.943,
+          "p95_ms": 79.142,
+          "min_ms": 48.065,
+          "max_ms": 121.73
+        }
+      },
+      "explain": {
+        "list_posts": [
+          {
+            "table": "p",
+            "type": "index",
+            "key": "idx_post_date",
+            "rows": 1531,
+            "extra": "Using where"
+          },
+          {
+            "table": "m",
+            "type": "eq_ref",
+            "key": "PRIMARY",
+            "rows": 1,
+            "extra": null
+          }
+        ],
+        "list_comments": [
+          {
+            "table": "c",
+            "type": "ref",
+            "key": "idx_comment_post",
+            "rows": 2500,
+            "extra": "Using where; Using filesort"
+          },
+          {
+            "table": "m",
+            "type": "eq_ref",
+            "key": "PRIMARY",
+            "rows": 1,
+            "extra": null
+          }
+        ]
+      }
+    },
+    {
+      "stage": "after_indexes",
+      "indexes_enabled": true,
+      "sql_ms": {
+        "list_posts": {
+          "avg_ms": 1.777,
+          "p95_ms": 2.012,
+          "min_ms": 1.561,
+          "max_ms": 2.097
+        },
+        "list_comments": {
+          "avg_ms": 15.572,
+          "p95_ms": 15.856,
+          "min_ms": 15.233,
+          "max_ms": 17.256
+        }
+      },
+      "api_ms": {
+        "list_posts": {
+          "avg_ms": 7.704,
+          "p95_ms": 8.893,
+          "min_ms": 5.692,
+          "max_ms": 11.276
+        },
+        "list_comments": {
+          "avg_ms": 47.157,
+          "p95_ms": 50.827,
+          "min_ms": 43.894,
+          "max_ms": 54.668
+        }
+      },
+      "explain": {
+        "list_posts": [
+          {
+            "table": "p",
+            "type": "index",
+            "key": "idx_post_date",
+            "rows": 1531,
+            "extra": "Using where"
+          },
+          {
+            "table": "m",
+            "type": "eq_ref",
+            "key": "PRIMARY",
+            "rows": 1,
+            "extra": null
+          }
+        ],
+        "list_comments": [
+          {
+            "table": "c",
+            "type": "range",
+            "key": "idx_comment_post_active_date",
+            "rows": 2500,
+            "extra": "Using index condition"
+          },
+          {
+            "table": "m",
+            "type": "eq_ref",
+            "key": "PRIMARY",
+            "rows": 1,
+            "extra": null
+          }
+        ]
+      }
+    }
+  ],
+  "speedup": {
+    "posts_sql_speedup": 1.047,
+    "comments_sql_speedup": 1.543,
+    "posts_api_speedup": 0.965,
+    "comments_api_speedup": 1.186
+  }
+}

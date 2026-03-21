@@ -266,6 +266,7 @@ CREATE INDEX idx_post_member ON Post(MemberID);
 CREATE INDEX idx_post_date ON Post(PostDate DESC);
 CREATE INDEX idx_comment_post ON Comment(PostID);
 CREATE INDEX idx_comment_member ON Comment(MemberID);
+CREATE INDEX idx_comment_post_active_date ON Comment(PostID, IsActive, CommentDate ASC);
 CREATE INDEX idx_like_target ON `Like`(TargetType, TargetID);
 CREATE INDEX idx_follow_follower ON Follow(FollowerID);
 CREATE INDEX idx_follow_following ON Follow(FollowingID);
