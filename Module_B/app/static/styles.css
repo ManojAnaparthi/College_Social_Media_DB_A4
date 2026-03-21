@@ -190,6 +190,17 @@ button:hover {
   flex: 1;
 }
 
+.post-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#admin-panel {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+}
+
 .hidden {
   display: none;
 }

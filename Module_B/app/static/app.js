@@ -65,6 +65,10 @@ function redirectTo(url) {
   window.location.href = url;
 }
 
+function isAdminUser() {
+  return currentUser?.role === "Admin";
+}
+
 async function parseApiResponse(res) {
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -164,8 +168,89 @@ function renderPosts(posts) {
         <button data-action="delete" data-id="${post.PostID}" data-can-modify="${canModify}">Delete</button>
       </div>
     `;
+
+    const buttons = div.querySelectorAll("button[data-can-modify='false']");
+    buttons.forEach((btn) => {
+      btn.disabled = true;
+      btn.title = "Only post owner or admin can modify";
+    });
+
     postList.appendChild(div);
   });
+}
+
+function initAdminControls() {
+  const adminPanel = document.getElementById("admin-panel");
+  if (!adminPanel) {
+    return;
+  }
+
+  if (!isAdminUser()) {
+    adminPanel.classList.add("hidden");
+    return;
+  }
+
+  adminPanel.classList.remove("hidden");
+
+  const deleteMemberForm = document.getElementById("admin-delete-member-form");
+  if (deleteMemberForm) {
+    deleteMemberForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const memberId = document.getElementById("admin_delete_member_id").value;
+      const res = await fetch(`/admin/members/${memberId}`, {
+        method: "DELETE",
+        headers: apiHeaders(),
+      });
+      const payload = await parseApiResponse(res);
+      if (!res.ok) {
+        setStatus("admin-delete-member-status", payload.detail || "Delete member failed", true);
+        return;
+      }
+      setStatus("admin-delete-member-status", payload.message || "Member deleted");
+    });
+  }
+
+  const addGroupMemberForm = document.getElementById("admin-add-group-member-form");
+  if (addGroupMemberForm) {
+    addGroupMemberForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const groupId = document.getElementById("admin_group_id").value;
+      const memberId = document.getElementById("admin_member_id").value;
+      const role = document.getElementById("admin_group_role").value;
+
+      const res = await fetch(`/admin/groups/${groupId}/members`, {
+        method: "POST",
+        headers: apiHeaders(),
+        body: JSON.stringify({ member_id: Number(memberId), role }),
+      });
+      const payload = await parseApiResponse(res);
+      if (!res.ok) {
+        setStatus("admin-add-group-member-status", payload.detail || "Add group member failed", true);
+        return;
+      }
+      setStatus("admin-add-group-member-status", payload.message || "Group member added");
+    });
+  }
+
+  const removeGroupMemberForm = document.getElementById("admin-remove-group-member-form");
+  if (removeGroupMemberForm) {
+    removeGroupMemberForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const groupId = document.getElementById("admin_remove_group_id").value;
+      const memberId = document.getElementById("admin_remove_member_id").value;
+
+      const res = await fetch(`/admin/groups/${groupId}/members/${memberId}`, {
+        method: "DELETE",
+        headers: apiHeaders(),
+      });
+      const payload = await parseApiResponse(res);
+      if (!res.ok) {
+        setStatus("admin-remove-group-member-status", payload.detail || "Remove group member failed", true);
+        return;
+      }
+      setStatus("admin-remove-group-member-status", payload.message || "Group member removed");
+    });
+  }
 }
 
 async function fetchMyPortfolio() {
@@ -254,6 +339,7 @@ function initPortfolioPage() {
       return;
     }
     fetchMyPortfolio();
+    initAdminControls();
   });
 
   const form = document.getElementById("portfolio-form");

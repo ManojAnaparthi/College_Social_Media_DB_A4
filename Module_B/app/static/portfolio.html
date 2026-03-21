@@ -46,6 +46,50 @@
         <button type="submit">Update Portfolio</button>
       </form>
       <div id="portfolio-status" class="status"></div>
+
+      <section id="admin-panel" class="hidden">
+        <h3>Admin Controls</h3>
+        <p class="status">Only Admin users can perform these actions.</p>
+
+        <h4>Delete Member</h4>
+        <form id="admin-delete-member-form">
+          <label>Member ID</label>
+          <input type="number" id="admin_delete_member_id" min="1" required />
+          <button type="submit">Delete Member</button>
+        </form>
+        <div id="admin-delete-member-status" class="status"></div>
+
+        <h4>Add Group Member</h4>
+        <form id="admin-add-group-member-form">
+          <label>Group ID</label>
+          <input type="number" id="admin_group_id" min="1" required />
+
+          <label>Member ID</label>
+          <input type="number" id="admin_member_id" min="1" required />
+
+          <label>Role</label>
+          <select id="admin_group_role">
+            <option>Member</option>
+            <option>Moderator</option>
+            <option>Admin</option>
+          </select>
+
+          <button type="submit">Add or Reactivate Group Member</button>
+        </form>
+        <div id="admin-add-group-member-status" class="status"></div>
+
+        <h4>Remove Group Member</h4>
+        <form id="admin-remove-group-member-form">
+          <label>Group ID</label>
+          <input type="number" id="admin_remove_group_id" min="1" required />
+
+          <label>Member ID</label>
+          <input type="number" id="admin_remove_member_id" min="1" required />
+
+          <button type="submit">Remove Group Member</button>
+        </form>
+        <div id="admin-remove-group-member-status" class="status"></div>
+      </section>
     </section>
   </main>
 

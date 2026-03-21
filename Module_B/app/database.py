@@ -3,10 +3,14 @@ from pymysql.cursors import DictCursor
 import os
 
 # Database configuration - in a real app, use environment variables
-DB_HOST = "localhost"
-DB_USER = "root"          # Replace with your MySQL username
-DB_PASSWORD = "password"  # Replace with your MySQL password
-DB_NAME = "college_social_media"
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "Chaitu@2006")
+DB_NAME = os.getenv("DB_NAME", "college_social_media")
+
+
+class DatabaseQueryError(Exception):
+    """Raised when a database operation cannot be completed."""
 
 def get_db_connection():
     """
@@ -27,8 +31,9 @@ def execute_query(query, params=None, fetchall=False, fetchone=False):
     """
     Helper function to safely execute SQL queries.
     """
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         with conn.cursor() as cursor:
             cursor.execute(query, params)
             if fetchall:
@@ -36,5 +41,8 @@ def execute_query(query, params=None, fetchall=False, fetchone=False):
             if fetchone:
                 return cursor.fetchone()
             return cursor.lastrowid
+    except pymysql.MySQLError as exc:
+        raise DatabaseQueryError("Database operation failed") from exc
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
