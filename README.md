@@ -162,14 +162,15 @@ print(db.list_tables())
 - Primary key type is integer (`int`) to match B+ Tree indexing.
 - This layer is in-memory only (no persistence yet).
 
-## Module B: Local API, UI, and Security (SubTask 1 and 2)
+## Module B: Local API, UI, and Security (SubTask 1, 2, and 3)
 
-This section documents the implementation status for Module B SubTask 1 and SubTask 2.
+This section documents the implementation status for Module B SubTask 1, SubTask 2, and SubTask 3.
 
 ### Scope Covered
 
 - SubTask 1: Local environment setup and core/project data integrity
 - SubTask 2: Session-validated APIs and web UI for CRUD + member portfolio with restricted access
+- SubTask 3: Strict RBAC and security logging with unauthorized direct-DB-change traceability
 
 ### Module B Structure
 
@@ -190,6 +191,8 @@ Module_B/
 |-- sql/
 |   |-- schema.sql           # Core + project table schema with FK constraints
 |   `-- sample_data.sql      # Demo dataset
+`-- logs/
+  `-- audit.log            # API security audit trail
 ```
 
 ### Setup (Module B)
@@ -203,8 +206,8 @@ pip install -r Module_B/requirements.txt
 2. Run the schema and load sample data in local MySQL:
 
 ```sql
-Module_B/sql/schema.sql;
-Module_B/sql/sample_data.sql;
+SOURCE Module_B/sql/schema.sql;
+SOURCE Module_B/sql/sample_data.sql;
 ```
 
 3. Run API server:
@@ -280,6 +283,37 @@ Member Portfolio access restriction behavior:
   - profiles permitted by access rule logic in backend
 - Unauthorized profile requests return permission errors and are shown clearly in UI.
 
+### SubTask 3: Role-Based Access Control (RBAC) and Security Logging
+
+Implemented RBAC behavior:
+
+- Admin-only actions are enforced for core administrative operations:
+  - Member management (`/admin/members`, `/admin/members/{member_id}`)
+  - Group membership administration (`/admin/groups/{group_id}/members`, `/admin/groups/{group_id}/members/{member_id}`)
+- Regular users are restricted to their own modifiable records for portfolio/posts/comments where applicable.
+- Unauthorized modification attempts return 403 and are logged.
+
+Implemented logging behavior:
+
+- Local file-based audit log is written to:
+  - `Module_B/logs/audit.log`
+- API write actions and denied attempts are captured with actor, endpoint, method, table, and outcome metadata.
+- Admin endpoint to inspect API audit trail:
+  - `GET /admin/audit-log`
+
+Direct database modification traceability (unauthorized detection):
+
+- Dedicated DB write log table:
+  - `ApiWriteLog` in `Module_B/sql/schema.sql`
+- Triggers record write source for key tables (`Member`, `Post`, `Comment`, `GroupMember`) and classify writes as:
+  - `API` (authorized session-validated API write)
+  - `DIRECT_DB` (direct SQL write, treated as unauthorized)
+- Admin endpoint for DB-level change review:
+  - `GET /admin/db-change-log`
+  - `GET /admin/db-change-log?unauthorized_only=true`
+
+This ensures any direct DB write that bypasses API/session validation is easily identifiable during log review.
+
 ### Requirement-to-Implementation Mapping
 
 - "Develop web-based UI and local APIs for CRUD on project-specific tables":
@@ -288,6 +322,19 @@ Member Portfolio access restriction behavior:
   - Done for protected business endpoints through token validation dependency.
 - "Member Portfolio with authenticated and permission-restricted viewing":
   - Done via portfolio endpoints and UI lookup workflow with backend authorization checks.
+- "Strict RBAC (Admin vs Regular User) for API/UI operations":
+  - Done via admin-only endpoint guard and owner/admin checks on update/delete flows.
+- "Log all data-modifying API calls locally and identify unauthorized direct DB modifications":
+  - Done via `Module_B/logs/audit.log` (API audit) and `ApiWriteLog` + triggers (DB write-source tracing).
+
+### Deliverables Format Check (Up to SubTask 3)
+
+- Source code scripts:
+  - Present in `Module_B/app/` and `Module_B/app/static/`
+- SQL scripts:
+  - Present in `Module_B/sql/schema.sql` and `Module_B/sql/sample_data.sql`
+- Security logs:
+  - Present in `Module_B/logs/audit.log`
 
 ### Notes for Demo
 
