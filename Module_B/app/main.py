@@ -41,6 +41,17 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class SignupRequest(BaseModel):
+    name: str
+    email: str
+    contact_number: str
+    college_id: str
+    department: str
+    age: int | None = Field(default=None, ge=16, le=100)
+    bio: str | None = None
+    password: str
+
+
 class PortfolioUpdate(BaseModel):
     bio: str | None = None
     contact_number: str | None = None
@@ -145,9 +156,7 @@ def _require_admin(request: Request, current_user: dict) -> None:
 
 
 def _verify_password(plain_password: str, stored_hash: str) -> bool:
-    # Supports assignment sample data while still enabling real bcrypt checks.
-    if stored_hash.startswith("$2b$12$DUMMY_HASH_"):
-        return plain_password == "password123"
+    # Strict hash-only verification.
     try:
         return pwd_context.verify(plain_password, stored_hash)
     except ValueError:
@@ -230,7 +239,7 @@ def login(request: LoginRequest):
         JOIN AuthCredential a ON m.MemberID = a.MemberID
         WHERE m.Email = %s
     """
-    user_record = execute_query(query, (request.username,), fetchone=True)
+    user_record = execute_query(query, (request.username.strip(),), fetchone=True)
     
     if not user_record:
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -252,6 +261,59 @@ def login(request: LoginRequest):
         "message": "Login successful",
         "session_token": token
     }
+
+
+@app.post("/signup")
+def signup(request: SignupRequest):
+    """Public signup for demo purposes; new members are always created as Student."""
+    if len(request.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    email = request.email.strip()
+    college_id = request.college_id.strip()
+    existing = execute_query(
+        "SELECT MemberID FROM Member WHERE Email = %s OR CollegeID = %s",
+        (email, college_id),
+        fetchone=True,
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Email or CollegeID already exists")
+
+    member_id = execute_query(
+        """
+        INSERT INTO Member (Name, Email, ContactNumber, CollegeID, Role, Department, Age, Bio)
+        VALUES (%s, %s, %s, %s, 'Student', %s, %s, %s)
+        """,
+        (
+            request.name.strip(),
+            email,
+            request.contact_number.strip(),
+            college_id,
+            request.department.strip(),
+            request.age,
+            request.bio,
+        ),
+    )
+    password_hash = pwd_context.hash(request.password)
+    execute_query(
+        """
+        INSERT INTO AuthCredential (MemberID, PasswordHash, PasswordAlgo)
+        VALUES (%s, %s, 'bcrypt')
+        """,
+        (member_id, password_hash),
+    )
+    _audit_log(
+        action="public_signup",
+        actor_id=None,
+        actor_role="Public",
+        endpoint="/signup",
+        method="POST",
+        table="Member,AuthCredential",
+        target_id=member_id,
+        outcome="success",
+        details="Public signup created Student account",
+    )
+    return {"message": "Signup successful. Please login.", "member_id": member_id}
     
 @app.get("/isAuth")
 def is_auth(current_user: dict = Depends(verify_session_token)):

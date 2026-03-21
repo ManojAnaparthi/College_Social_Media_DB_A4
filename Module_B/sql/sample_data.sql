@@ -32,29 +32,29 @@ INSERT INTO Member (Name, Email, ContactNumber, Image, CollegeID, Role, Departme
 
 -- ============================================================================
 -- Insert Sample Data into AuthCredential Table (20 rows)
--- NOTE: These are dummy password hashes (placeholders), not real passwords.
+-- NOTE: Sample credentials are bcrypt hashes for password123.
 -- ============================================================================
 INSERT INTO AuthCredential (MemberID, PasswordHash) VALUES
-(1, '$2b$12$DUMMY_HASH_MEMBER_01___________________________'),
-(2, '$2b$12$DUMMY_HASH_MEMBER_02___________________________'),
-(3, '$2b$12$DUMMY_HASH_MEMBER_03___________________________'),
-(4, '$2b$12$DUMMY_HASH_MEMBER_04___________________________'),
-(5, '$2b$12$DUMMY_HASH_MEMBER_05___________________________'),
-(6, '$2b$12$DUMMY_HASH_MEMBER_06___________________________'),
-(7, '$2b$12$DUMMY_HASH_MEMBER_07___________________________'),
-(8, '$2b$12$DUMMY_HASH_MEMBER_08___________________________'),
-(9, '$2b$12$DUMMY_HASH_MEMBER_09___________________________'),
-(10, '$2b$12$DUMMY_HASH_MEMBER_10__________________________'),
-(11, '$2b$12$DUMMY_HASH_MEMBER_11__________________________'),
-(12, '$2b$12$DUMMY_HASH_MEMBER_12__________________________'),
-(13, '$2b$12$DUMMY_HASH_MEMBER_13__________________________'),
-(14, '$2b$12$DUMMY_HASH_MEMBER_14__________________________'),
-(15, '$2b$12$DUMMY_HASH_MEMBER_15__________________________'),
-(16, '$2b$12$DUMMY_HASH_MEMBER_16__________________________'),
-(17, '$2b$12$DUMMY_HASH_MEMBER_17__________________________'),
-(18, '$2b$12$DUMMY_HASH_MEMBER_18__________________________'),
-(19, '$2b$12$DUMMY_HASH_MEMBER_19__________________________'),
-(20, '$2b$12$DUMMY_HASH_MEMBER_20__________________________');
+(1, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(2, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(3, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(4, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(5, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(6, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(7, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(8, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(9, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(10, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(11, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(12, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(13, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(14, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(15, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(16, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(17, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(18, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(19, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'),
+(20, '$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.');
 
 -- ============================================================================
 -- Insert Sample Data into Follow Table (20 rows)

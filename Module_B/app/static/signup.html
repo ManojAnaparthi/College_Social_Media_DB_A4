@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign Up | College Social Media Platform</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body data-page="signup">
+  <header class="hero">
+    <h1>College Social Media Platform</h1>
+    <p>Create a new account</p>
+  </header>
+
+  <main class="single-column">
+    <section class="card auth-card">
+      <h2>Sign Up</h2>
+      <form id="signup-form">
+        <label>Full Name</label>
+        <input type="text" id="signup_name" required placeholder="Aarav Mehta" />
+
+        <label>Email</label>
+        <input type="email" id="signup_email" required placeholder="aarav.mehta@iitgn.ac.in" />
+
+        <label>Contact Number</label>
+        <input type="text" id="signup_contact" required placeholder="9876543200" />
+
+        <label>College ID</label>
+        <input type="text" id="signup_college_id" required placeholder="IITGN2026999" />
+
+        <label>Department</label>
+        <input type="text" id="signup_department" required placeholder="Computer Science" />
+
+        <label>Age (optional)</label>
+        <input type="number" id="signup_age" min="16" max="100" />
+
+        <label>Bio (optional)</label>
+        <textarea id="signup_bio" rows="3" placeholder="Tell us about yourself"></textarea>
+
+        <label>Password</label>
+        <input type="password" id="signup_password" minlength="8" required placeholder="At least 8 characters" />
+
+        <button type="submit">Create Account</button>
+      </form>
+      <p class="status">Already have an account? <a href="/static/login.html">Login</a></p>
+      <div id="signup-status" class="status"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

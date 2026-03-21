@@ -183,6 +183,7 @@ Module_B/
 |   |-- test_db.py           # DB connectivity smoke test
 |   `-- static/
 |       |-- login.html       # Login page
+|       |-- signup.html      # Optional demo signup page
 |       |-- portfolio.html   # Portfolio page with member profile lookup
 |       |-- create-post.html # Dedicated create post page
 |       |-- posts.html       # Dedicated posts listing page
@@ -190,7 +191,8 @@ Module_B/
 |       `-- styles.css       # Shared styles
 |-- sql/
 |   |-- schema.sql           # Core + project table schema with FK constraints
-|   `-- sample_data.sql      # Demo dataset
+|   |-- sample_data.sql      # Demo dataset
+|   `-- sample_passwords.txt # Sample IDs/emails mapped to shared demo password
 `-- logs/
   `-- audit.log            # API security audit trail
 ```
@@ -209,6 +211,10 @@ pip install -r Module_B/requirements.txt
 SOURCE Module_B/sql/schema.sql;
 SOURCE Module_B/sql/sample_data.sql;
 ```
+
+Sample login note:
+- `Module_B/sql/sample_passwords.txt` contains the sample user IDs/emails and their demo credentials.
+- All seeded sample users share the same password: `password123`.
 
 3. Run API server:
 
@@ -308,6 +314,7 @@ Evidence in code:
 Implemented APIs (session-aware):
 
 - Auth/session:
+  - `POST /signup` (optional demo path; creates `Student` account)
   - `POST /login`
   - `GET /isAuth`
   - `POST /logout`
@@ -329,6 +336,7 @@ Implemented APIs (session-aware):
 Implemented web UI pages:
 
 - `login.html`: authentication page
+- `signup.html`: optional demo self-signup page
 - `portfolio.html`: own portfolio + restricted member profile lookup by MemberID
 - `create-post.html`: dedicated create-post form
 - `posts.html`: dedicated all-posts listing with edit/delete controls
@@ -337,6 +345,7 @@ Implemented web UI pages:
 Session validation behavior:
 
 - Protected APIs are guarded using local JWT session validation dependency.
+- Login uses bcrypt hash verification only (no dummy-password fallback).
 - UI stores session locally and redirects unauthenticated users to login.
 
 Member Portfolio access restriction behavior:
@@ -355,6 +364,8 @@ Implemented RBAC behavior:
 - Admin-only actions are enforced for core administrative operations:
   - Member management (`/admin/members`, `/admin/members/{member_id}`)
   - Group membership administration (`/admin/groups/{group_id}/members`, `/admin/groups/{group_id}/members/{member_id}`)
+- Official member creation path is admin-managed via `/admin/members`.
+- Public `/signup` is kept only as an optional demo convenience and always creates `Student` role accounts.
 - Regular users are restricted to their own modifiable records for portfolio/posts/comments where applicable.
 - Unauthorized modification attempts return 403 and are logged.
 
@@ -403,5 +414,5 @@ This ensures any direct DB write that bypasses API/session validation is easily 
 
 ### Notes for Demo
 
-- Recommended login with sample data uses email from `sample_data.sql` and placeholder password logic configured in app for demo hashes.
+- Recommended login with sample data uses email from `sample_data.sql` and password `password123` (see `Module_B/sql/sample_passwords.txt`).
 - Demonstrate both permitted and denied portfolio/profile access in UI for clear evaluation evidence.

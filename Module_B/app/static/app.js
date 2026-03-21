@@ -335,6 +335,55 @@ function initLoginPage() {
   });
 }
 
+function initSignupPage() {
+  verifySession().then((user) => {
+    if (user) {
+      redirectTo("/static/portfolio.html");
+    }
+  });
+
+  const form = document.getElementById("signup-form");
+  if (!form) {
+    return;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setStatus("signup-status", "Creating account...");
+
+    const body = {
+      name: document.getElementById("signup_name").value,
+      email: document.getElementById("signup_email").value,
+      contact_number: document.getElementById("signup_contact").value,
+      college_id: document.getElementById("signup_college_id").value,
+      department: document.getElementById("signup_department").value,
+      age: document.getElementById("signup_age").value ? Number(document.getElementById("signup_age").value) : null,
+      bio: document.getElementById("signup_bio").value || null,
+      password: document.getElementById("signup_password").value,
+    };
+
+    try {
+      const res = await fetch("/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await parseApiResponse(res);
+
+      if (!res.ok) {
+        setStatus("signup-status", payload.detail || "Signup failed", true);
+        return;
+      }
+
+      setStatus("signup-status", "Signup successful. Redirecting to login...");
+      setTimeout(() => redirectTo("/static/login.html"), 900);
+    } catch (err) {
+      setStatus("signup-status", "Unable to reach server. Check API and database connection.", true);
+      console.error("Signup error:", err);
+    }
+  });
+}
+
 function initPortfolioPage() {
   setupHamburgerAndLogout();
   requireAuth().then((user) => {
@@ -542,6 +591,10 @@ const page = document.body.dataset.page;
 
 if (page === "login") {
   initLoginPage();
+}
+
+if (page === "signup") {
+  initSignupPage();
 }
 
 if (page === "portfolio") {
