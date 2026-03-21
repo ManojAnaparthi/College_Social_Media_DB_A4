@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from database import DatabaseQueryError, execute_query
 
 app = FastAPI()
@@ -45,6 +45,7 @@ class PortfolioUpdate(BaseModel):
     bio: str | None = None
     contact_number: str | None = None
     department: str | None = None
+    age: int | None = Field(default=None, ge=16, le=100)
 
 
 class PostCreate(BaseModel):
@@ -76,6 +77,7 @@ class AdminMemberCreate(BaseModel):
     college_id: str
     role: Literal["Student", "Faculty", "Staff", "Admin"] = "Student"
     department: str
+    age: int | None = Field(default=None, ge=16, le=100)
     bio: str | None = None
     password: str
 
@@ -289,7 +291,7 @@ def get_portfolio(member_id: int, current_user: dict = Depends(verify_session_to
         
     # 2. Fetch data from MySQL
     query = """
-        SELECT Name, Email, ContactNumber, Department, Bio, JoinDate, Role
+        SELECT Name, Email, ContactNumber, Department, Age, Bio, JoinDate, Role
         FROM Member
         WHERE MemberID = %s
     """
@@ -341,6 +343,9 @@ def update_portfolio(
     if update_data.department is not None:
         updates.append("Department = %s")
         params.append(update_data.department)
+    if update_data.age is not None:
+        updates.append("Age = %s")
+        params.append(update_data.age)
         
     if not updates:
         return {"message": "No data provided to update."}
@@ -816,8 +821,8 @@ def create_member_admin(payload: AdminMemberCreate, request: Request, current_us
 
     member_id = execute_query(
         """
-        INSERT INTO Member (Name, Email, ContactNumber, CollegeID, Role, Department, Bio)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO Member (Name, Email, ContactNumber, CollegeID, Role, Department, Age, Bio)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             payload.name.strip(),
@@ -826,6 +831,7 @@ def create_member_admin(payload: AdminMemberCreate, request: Request, current_us
             payload.college_id.strip(),
             payload.role,
             payload.department.strip(),
+            payload.age,
             payload.bio,
         ),
         audit_context=_db_audit_context(action="admin_member_create", current_user=current_user, request=request),

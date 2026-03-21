@@ -123,6 +123,7 @@ function renderPortfolio(data) {
     <p><strong>Email:</strong> ${data.Email}</p>
     <p><strong>Contact:</strong> ${data.ContactNumber ?? ""}</p>
     <p><strong>Department:</strong> ${data.Department ?? ""}</p>
+    <p><strong>Age:</strong> ${data.Age ?? ""}</p>
     <p><strong>Role:</strong> ${data.Role}</p>
     <p><strong>Bio:</strong> ${data.Bio ?? ""}</p>
   `;
@@ -130,6 +131,7 @@ function renderPortfolio(data) {
   document.getElementById("bio").value = data.Bio ?? "";
   document.getElementById("contact_number").value = data.ContactNumber ?? "";
   document.getElementById("department").value = data.Department ?? "";
+  document.getElementById("age").value = data.Age ?? "";
 }
 
 function renderMemberPortfolio(data) {
@@ -143,6 +145,7 @@ function renderMemberPortfolio(data) {
     <p><strong>Email:</strong> ${data.Email}</p>
     <p><strong>Contact:</strong> ${data.ContactNumber ?? ""}</p>
     <p><strong>Department:</strong> ${data.Department ?? ""}</p>
+    <p><strong>Age:</strong> ${data.Age ?? ""}</p>
     <p><strong>Role:</strong> ${data.Role}</p>
     <p><strong>Bio:</strong> ${data.Bio ?? ""}</p>
   `;
@@ -354,6 +357,7 @@ function initPortfolioPage() {
       bio: document.getElementById("bio").value,
       contact_number: document.getElementById("contact_number").value,
       department: document.getElementById("department").value,
+      age: document.getElementById("age").value ? Number(document.getElementById("age").value) : null,
     };
 
     const res = await fetch(`/portfolio/${currentUser.member_id}`, {

@@ -7,6 +7,7 @@ CREATE DATABASE IF NOT EXISTS college_social_media;
 USE college_social_media;
 
 -- Drop existing tables if they exist (in reverse order to respect foreign keys)
+DROP TABLE IF EXISTS ApiWriteLog;
 DROP TABLE IF EXISTS ActivityLog;
 DROP TABLE IF EXISTS Notification;
 DROP TABLE IF EXISTS Message;
@@ -33,11 +34,13 @@ CREATE TABLE Member (
     CollegeID VARCHAR(20) NOT NULL UNIQUE,
     Role ENUM('Student', 'Faculty', 'Staff', 'Admin') NOT NULL DEFAULT 'Student',
     Department VARCHAR(50) NOT NULL,
+    Age INT,
     IsVerified BOOLEAN NOT NULL DEFAULT FALSE,
     JoinDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     LastLogin DATETIME,
     Bio TEXT,
-    CONSTRAINT chk_email_format CHECK (Email LIKE '%@%.%')
+    CONSTRAINT chk_email_format CHECK (Email LIKE '%@%.%'),
+    CONSTRAINT chk_member_age CHECK (Age IS NULL OR Age BETWEEN 16 AND 100)
 );
 
 -- ============================================================================
