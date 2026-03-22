@@ -1102,7 +1102,7 @@ def delete_comment(comment_id: int, request: Request, current_user: dict = Depen
 
 @app.put("/posts/{post_id}")
 def update_post(post_id: int, update_data: PostUpdate, request: Request, current_user: dict = Depends(verify_session_token)):
-    """Update post content/metadata. Only owner or admin may modify."""
+    """Update post content/metadata. Only owner may modify."""
     member_id = current_user.get("member_id")
     role = current_user.get("role")
     if member_id is None:
@@ -1116,7 +1116,7 @@ def update_post(post_id: int, update_data: PostUpdate, request: Request, current
     if not post_owner or not post_owner["IsActive"]:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    if role != "Admin" and post_owner["MemberID"] != member_id:
+    if post_owner["MemberID"] != member_id:
         _audit_log(
             action="post_update",
             actor_id=member_id,

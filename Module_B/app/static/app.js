@@ -382,17 +382,20 @@ function renderPostsInto(containerId, posts, allowOwnerMenu = true) {
 
   posts.forEach((post) => {
     const isOwner = Number(currentUser?.member_id) === Number(post.MemberID);
+    const isAdmin = isAdminUser();
+    const canEdit = isOwner;
+    const canDelete = isOwner || isAdmin;
     const viewerHasLiked = Boolean(post.ViewerHasLiked);
 
     const div = document.createElement("div");
     div.className = "post-item";
-    const ownerActions = allowOwnerMenu && isOwner
+    const ownerActions = allowOwnerMenu && canDelete
       ? `
       <details class="post-menu">
         <summary title="Post actions">...</summary>
         <div class="post-menu-items">
-          <button data-action="edit" data-id="${post.PostID}" data-owner="true">Edit</button>
-          <button data-action="delete" data-id="${post.PostID}" data-owner="true">Delete</button>
+          ${canEdit ? `<button data-action="edit" data-id="${post.PostID}" data-edit-allowed="true">Edit</button>` : ""}
+          <button data-action="delete" data-id="${post.PostID}" data-delete-allowed="true">Delete</button>
         </div>
       </details>
     `
@@ -906,7 +909,8 @@ function initPostsPage() {
 
     const action = target.dataset.action;
     const postId = target.dataset.id;
-    const ownerButton = target.dataset.owner === "true";
+    const editAllowed = target.dataset.editAllowed === "true";
+    const deleteAllowed = target.dataset.deleteAllowed === "true";
     if (!action || !postId) {
       return;
     }
@@ -916,7 +920,11 @@ function initPostsPage() {
       return;
     }
 
-    if ((action === "edit" || action === "delete") && !ownerButton) {
+    if (action === "edit" && !editAllowed) {
+      return;
+    }
+
+    if (action === "delete" && !deleteAllowed) {
       return;
     }
 

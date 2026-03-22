@@ -388,6 +388,7 @@ Implemented RBAC behavior:
 - Official member creation path is admin-managed via `/admin/members`.
 - Public `/signup` is kept only as an optional demo convenience and always creates `Student` role accounts.
 - Regular users are restricted to their own modifiable records for portfolio/posts/comments where applicable.
+- Post permissions are intentionally stricter: only post owners can edit posts; Admin can delete any post (including posts by other members).
 - Unauthorized modification attempts return 403 and are logged.
 
 Implemented logging behavior:
@@ -420,7 +421,7 @@ This ensures any direct DB write that bypasses API/session validation is easily 
 - "Member Portfolio with authenticated viewing and restricted edit permissions":
   - Done via public read-only portfolio endpoint for authenticated users and owner/admin-only update path.
 - "Strict RBAC (Admin vs Regular User) for API/UI operations":
-  - Done via admin-only endpoint guard and owner/admin checks on update/delete flows.
+  - Done via admin-only endpoint guard and owner/admin checks on update/delete flows, including owner-only post edits and admin-enabled post deletes.
 - "Log all data-modifying API calls locally and identify unauthorized direct DB modifications":
   - Done via `Module_B/logs/audit.log` (API audit) and `ApiWriteLog` + triggers (DB write-source tracing).
 
