@@ -214,42 +214,17 @@ Sample login note:
 - `Module_B/sql/sample_passwords.txt` contains the sample user IDs/emails and their demo credentials.
 - All seeded sample users share the same password: `password123`.
 
-3. Run API server:
-
-```bash
-cd Module_B/app
-uvicorn main:app --reload --port 8001
-```
-
-If you are on Windows PowerShell, set the DB password environment variable before starting the API:
+If you are on Windows PowerShell, set the DB password and JWT Secret Key environment variables before starting the API:
 
 ```powershell
 $env:DB_PASSWORD="<your-mysql-password>"
-$env:JWT_SECRET_KEY="<your-random-secret>"
-
-cd Module_B/app
-uvicorn main:app --reload --port 8001
-```
-
-JWT secret setup (Windows PowerShell):
-
-1. Generate a strong random JWT secret for the current shell:
-
-```powershell
 $jwt = [Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))
 $env:JWT_SECRET_KEY = $jwt
 ```
-
-2. Set it permanently for new PowerShell sessions:
-
-```powershell
-setx JWT_SECRET_KEY "$jwt"
+Run the Live UI:
 ```
-
-3. Quick verification before starting API:
-
-```powershell
-if ([string]::IsNullOrWhiteSpace($env:JWT_SECRET_KEY)) { "JWT_SECRET_KEY is missing" } else { "JWT_SECRET_KEY is set" }
+cd Module_B/app
+uvicorn main:app --reload --port 8001
 ```
 
 Optional (persist across new PowerShell sessions):
@@ -258,7 +233,7 @@ Optional (persist across new PowerShell sessions):
 setx DB_PASSWORD "<your-mysql-password>"
 setx JWT_SECRET_KEY "<your-random-secret>"
 ```
-**DON'T TRY TO SET THE PASSWORD IN database.py**
+**DON'T TRY TO SET THE PASSWORD OR KEY IN database.py**
 
 ## Module B SubTask 4 and 5 (Indexing + Benchmarking)
 
@@ -429,30 +404,3 @@ Direct database modification traceability (unauthorized detection):
   - `GET /admin/db-change-log?unauthorized_only=true`
 
 This ensures any direct DB write that bypasses API/session validation is easily identifiable during log review.
-
-### Requirement-to-Implementation Mapping
-
-- "Develop web-based UI and local APIs for CRUD on project-specific tables":
-  - Done via Post and Comment API endpoints + dedicated UI pages.
-- "Ensure every API call validates user session via local auth":
-  - Done for protected business endpoints through token validation dependency.
-- "Member Portfolio with authenticated viewing and restricted edit permissions":
-  - Done via public read-only portfolio endpoint for authenticated users and owner/admin-only update path.
-- "Strict RBAC (Admin vs Regular User) for API/UI operations":
-  - Done via admin-only endpoint guard and owner/admin checks on update/delete flows, including owner-only post edits and admin-enabled post deletes.
-- "Log all data-modifying API calls locally and identify unauthorized direct DB modifications":
-  - Done via `Module_B/logs/audit.log` (API audit) and `ApiWriteLog` + triggers (DB write-source tracing).
-
-### Deliverables Format Check (Up to SubTask 3)
-
-- Source code scripts:
-  - Present in `Module_B/app/` and `Module_B/app/static/`
-- SQL scripts:
-  - Present in `Module_B/sql/schema.sql` and `Module_B/sql/sample_data.sql`
-- Security logs:
-  - Present in `Module_B/logs/audit.log`
-
-### Notes for Demo
-
-- Recommended login with sample data uses email from `sample_data.sql` and password `password123` (see `Module_B/sql/sample_passwords.txt`).
-- Demonstrate both permitted and denied portfolio/profile access in UI for clear evaluation evidence.
