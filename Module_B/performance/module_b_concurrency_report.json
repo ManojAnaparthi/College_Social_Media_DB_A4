@@ -1,0 +1,127 @@
+{
+  "timestamp_utc": "2026-04-04T20:25:34.529689+00:00",
+  "config": {
+    "base_url": "http://127.0.0.1:8001",
+    "username": "rahul.sharma@iitgn.ac.in",
+    "target_member_id": 19,
+    "post_id": 1,
+    "race_requests": 200,
+    "race_workers": 40,
+    "failure_requests": 120,
+    "failure_workers": 24,
+    "stress_requests": 1000,
+    "stress_workers": 80,
+    "offset_window": 1500,
+    "keep_generated_comments": false
+  },
+  "db_config": {
+    "host": "localhost",
+    "user": "root",
+    "database": "college_social_media"
+  },
+  "consistency_before": {
+    "post_id": 1,
+    "post_like_count": 3,
+    "like_rows": 3,
+    "post_comment_count": 3,
+    "active_comment_rows": 3,
+    "like_count_consistent": true,
+    "comment_count_consistent": true
+  },
+  "race_follow_test": {
+    "requests": 200,
+    "workers": 40,
+    "elapsed_s": 1.038,
+    "status_histogram": {
+      "200": 200
+    },
+    "success_responses": 200,
+    "latency": {
+      "avg_ms": 190.882,
+      "min_ms": 46.773,
+      "max_ms": 273.555,
+      "p50_ms": 196.115,
+      "p95_ms": 250.252
+    },
+    "follow_relation_count": 1,
+    "race_passed": true,
+    "details": "Pass requires exactly one follow edge after all concurrent attempts",
+    "sample_response": {
+      "message": "Followed member successfully",
+      "follow_id": 32,
+      "created": true
+    }
+  },
+  "failure_simulation": {
+    "requests": 120,
+    "workers": 24,
+    "elapsed_s": 0.523,
+    "status_histogram": {
+      "200": 60,
+      "400": 60
+    },
+    "latency": {
+      "avg_ms": 95.995,
+      "min_ms": 19.527,
+      "max_ms": 118.888,
+      "p50_ms": 98.739,
+      "p95_ms": 116.287
+    },
+    "before": {
+      "post_id": 1,
+      "post_like_count": 3,
+      "like_rows": 3,
+      "post_comment_count": 3,
+      "active_comment_rows": 3,
+      "like_count_consistent": true,
+      "comment_count_consistent": true
+    },
+    "after": {
+      "post_id": 1,
+      "post_like_count": 3,
+      "like_rows": 3,
+      "post_comment_count": 3,
+      "active_comment_rows": 3,
+      "like_count_consistent": true,
+      "comment_count_consistent": true
+    },
+    "valid_success_responses": 60,
+    "invalid_expected_failures": 60,
+    "expected_comment_delta": 60,
+    "actual_comment_delta": 60,
+    "cleanup_performed": true,
+    "cleaned_comment_rows": 60,
+    "failure_simulation_passed": true,
+    "details": "Pass requires failed writes to leave no partial comment-count effects"
+  },
+  "stress_reads": {
+    "requests": 1000,
+    "workers": 80,
+    "elapsed_s": 3.38,
+    "throughput_req_per_s": 295.85,
+    "success_count": 1000,
+    "success_rate": 1.0,
+    "status_histogram": {
+      "200": 1000
+    },
+    "latency": {
+      "avg_ms": 259.644,
+      "min_ms": 19.369,
+      "max_ms": 324.844,
+      "p50_ms": 270.53,
+      "p95_ms": 300.963
+    },
+    "stress_passed": true,
+    "details": "Pass threshold uses >=95% successful responses under configured load"
+  },
+  "consistency_after": {
+    "post_id": 1,
+    "post_like_count": 3,
+    "like_rows": 3,
+    "post_comment_count": 3,
+    "active_comment_rows": 3,
+    "like_count_consistent": true,
+    "comment_count_consistent": true
+  },
+  "overall_pass": true
+}

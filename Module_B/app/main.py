@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
-from database import DatabaseQueryError, execute_query
+from database import DatabaseQueryError, execute_query, execute_transaction
 
 app = FastAPI()
 
@@ -288,29 +288,49 @@ def signup(request: SignupRequest):
     if existing:
         raise HTTPException(status_code=400, detail="Email or CollegeID already exists")
 
-    member_id = execute_query(
-        """
-        INSERT INTO Member (Name, Email, ContactNumber, CollegeID, Role, Department, Age, Bio)
-        VALUES (%s, %s, %s, %s, 'Student', %s, %s, %s)
-        """,
-        (
-            request.name.strip(),
-            email,
-            request.contact_number.strip(),
-            college_id,
-            request.department.strip(),
-            request.age,
-            request.bio,
-        ),
-    )
     password_hash = pwd_context.hash(request.password)
-    execute_query(
-        """
-        INSERT INTO AuthCredential (MemberID, PasswordHash, PasswordAlgo)
-        VALUES (%s, %s, 'bcrypt')
-        """,
-        (member_id, password_hash),
-    )
+
+    def _signup_tx(cursor):
+        cursor.execute(
+            """
+            INSERT INTO Member (Name, Email, ContactNumber, CollegeID, Role, Department, Age, Bio)
+            VALUES (%s, %s, %s, %s, 'Student', %s, %s, %s)
+            """,
+            (
+                request.name.strip(),
+                email,
+                request.contact_number.strip(),
+                college_id,
+                request.department.strip(),
+                request.age,
+                request.bio,
+            ),
+        )
+        new_member_id = int(cursor.lastrowid)
+        cursor.execute(
+            """
+            INSERT INTO AuthCredential (MemberID, PasswordHash, PasswordAlgo)
+            VALUES (%s, %s, 'bcrypt')
+            """,
+            (new_member_id, password_hash),
+        )
+        return new_member_id
+
+    try:
+        member_id = execute_transaction(
+            _signup_tx,
+            audit_context={
+                "actor_id": None,
+                "action": "public_signup",
+                "endpoint": "/signup",
+                "method": "POST",
+            },
+        )
+    except DatabaseQueryError as exc:
+        if exc.error_code == 1062:
+            raise HTTPException(status_code=400, detail="Email or CollegeID already exists")
+        raise
+
     _audit_log(
         action="public_signup",
         actor_id=None,
@@ -478,16 +498,27 @@ def follow_member(member_id: int, request: Request, current_user: dict = Depends
     if not target:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    if _is_following(follower_id, member_id):
-        raise HTTPException(status_code=400, detail="Already following this member")
+    audit_context = _db_audit_context(action="follow_create", current_user=current_user, request=request)
 
-    follow_id = execute_query(
-        "INSERT INTO Follow (FollowerID, FollowingID) VALUES (%s, %s)",
-        (follower_id, member_id),
-        audit_context=_db_audit_context(action="follow_create", current_user=current_user, request=request),
-    )
+    def _follow_tx(cursor):
+        cursor.execute(
+            "INSERT IGNORE INTO Follow (FollowerID, FollowingID) VALUES (%s, %s)",
+            (follower_id, member_id),
+        )
+        created = cursor.rowcount > 0
+        cursor.execute(
+            "SELECT FollowID FROM Follow WHERE FollowerID = %s AND FollowingID = %s",
+            (follower_id, member_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to resolve follow relationship after write")
+        return int(row["FollowID"]), created
+
+    follow_id, created = execute_transaction(_follow_tx, audit_context=audit_context)
+
     _audit_log(
-        action="follow_create",
+        action="follow_create" if created else "follow_create_noop",
         actor_id=follower_id,
         actor_role=current_user.get("role"),
         endpoint=str(request.url.path),
@@ -495,9 +526,17 @@ def follow_member(member_id: int, request: Request, current_user: dict = Depends
         table="Follow",
         target_id=follow_id,
         outcome="success",
-        details=f"Member {follower_id} followed member {member_id}",
+        details=(
+            f"Member {follower_id} followed member {member_id}"
+            if created
+            else f"Member {follower_id} already followed member {member_id}"
+        ),
     )
-    return {"message": "Followed member successfully", "follow_id": follow_id}
+    return {
+        "message": "Followed member successfully" if created else "Already following this member",
+        "follow_id": follow_id,
+        "created": created,
+    }
 
 
 @app.delete("/members/{member_id}/follow")
@@ -859,45 +898,50 @@ def toggle_post_like(post_id: int, request: Request, current_user: dict = Depend
     if not _get_visible_post(post_id, member_id):
         raise HTTPException(status_code=404, detail="Post not found or not visible")
 
-    existing = execute_query(
-        """
-        SELECT LikeID
-        FROM `Like`
-        WHERE MemberID = %s AND TargetType = 'Post' AND TargetID = %s
-        """,
-        (member_id, post_id),
-        fetchone=True,
-    )
+    audit_context = _db_audit_context(action="post_like_toggle", current_user=current_user, request=request)
 
-    if existing:
-        execute_query(
-            "DELETE FROM `Like` WHERE LikeID = %s",
-            (existing["LikeID"],),
-            audit_context=_db_audit_context(action="post_unlike", current_user=current_user, request=request),
-        )
-        execute_query(
-            "UPDATE Post SET LikeCount = GREATEST(LikeCount - 1, 0) WHERE PostID = %s",
+    def _toggle_like_tx(cursor):
+        cursor.execute(
+            "SELECT PostID FROM Post WHERE PostID = %s AND IsActive = TRUE FOR UPDATE",
             (post_id,),
-            audit_context=_db_audit_context(action="post_unlike", current_user=current_user, request=request),
         )
-        liked = False
-        action_name = "post_unlike"
-    else:
-        like_id = execute_query(
-            "INSERT INTO `Like` (MemberID, TargetType, TargetID) VALUES (%s, 'Post', %s)",
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        cursor.execute(
+            """
+            SELECT LikeID
+            FROM `Like`
+            WHERE MemberID = %s AND TargetType = 'Post' AND TargetID = %s
+            FOR UPDATE
+            """,
             (member_id, post_id),
-            audit_context=_db_audit_context(action="post_like", current_user=current_user, request=request),
         )
-        execute_query(
-            "UPDATE Post SET LikeCount = LikeCount + 1 WHERE PostID = %s",
-            (post_id,),
-            audit_context=_db_audit_context(action="post_like", current_user=current_user, request=request),
-        )
-        liked = True
-        action_name = "post_like"
+        existing = cursor.fetchone()
 
-    post_row = execute_query("SELECT LikeCount FROM Post WHERE PostID = %s", (post_id,), fetchone=True)
-    like_count = int(post_row["LikeCount"]) if post_row else 0
+        if existing:
+            cursor.execute("DELETE FROM `Like` WHERE LikeID = %s", (existing["LikeID"],))
+            cursor.execute(
+                "UPDATE Post SET LikeCount = GREATEST(LikeCount - 1, 0) WHERE PostID = %s",
+                (post_id,),
+            )
+            liked_state = False
+            action = "post_unlike"
+        else:
+            cursor.execute(
+                "INSERT INTO `Like` (MemberID, TargetType, TargetID) VALUES (%s, 'Post', %s)",
+                (member_id, post_id),
+            )
+            cursor.execute("UPDATE Post SET LikeCount = LikeCount + 1 WHERE PostID = %s", (post_id,))
+            liked_state = True
+            action = "post_like"
+
+        cursor.execute("SELECT LikeCount FROM Post WHERE PostID = %s", (post_id,))
+        post_row = cursor.fetchone()
+        like_total = int(post_row["LikeCount"]) if post_row else 0
+        return liked_state, action, like_total
+
+    liked, action_name, like_count = execute_transaction(_toggle_like_tx, audit_context=audit_context)
 
     _audit_log(
         action=action_name,
@@ -935,14 +979,32 @@ def create_comment(
     if not comment_data.content.strip():
         raise HTTPException(status_code=400, detail="Comment content cannot be empty")
 
-    comment_id = execute_query(
-        """
-        INSERT INTO Comment (PostID, MemberID, Content)
-        VALUES (%s, %s, %s)
-        """,
-        (post_id, member_id, comment_data.content.strip()),
-        audit_context=_db_audit_context(action="comment_create", current_user=current_user, request=request),
-    )
+    audit_context = _db_audit_context(action="comment_create", current_user=current_user, request=request)
+
+    def _create_comment_tx(cursor):
+        cursor.execute(
+            "SELECT PostID FROM Post WHERE PostID = %s AND IsActive = TRUE FOR UPDATE",
+            (post_id,),
+        )
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        cursor.execute(
+            """
+            INSERT INTO Comment (PostID, MemberID, Content)
+            VALUES (%s, %s, %s)
+            """,
+            (post_id, member_id, comment_data.content.strip()),
+        )
+        new_comment_id = int(cursor.lastrowid)
+        cursor.execute(
+            "UPDATE Post SET CommentCount = CommentCount + 1 WHERE PostID = %s",
+            (post_id,),
+        )
+        return new_comment_id
+
+    comment_id = execute_transaction(_create_comment_tx, audit_context=audit_context)
+
     _audit_log(
         action="comment_create",
         actor_id=member_id,
@@ -1060,7 +1122,7 @@ def delete_comment(comment_id: int, request: Request, current_user: dict = Depen
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
     comment_owner = execute_query(
-        "SELECT CommentID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
+        "SELECT CommentID, PostID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
         (comment_id,),
         fetchone=True,
     )
@@ -1081,11 +1143,22 @@ def delete_comment(comment_id: int, request: Request, current_user: dict = Depen
         )
         raise HTTPException(status_code=403, detail="You do not have permission to delete this comment")
 
-    execute_query(
-        "UPDATE Comment SET IsActive = FALSE WHERE CommentID = %s",
-        (comment_id,),
-        audit_context=_db_audit_context(action="comment_delete", current_user=current_user, request=request),
-    )
+    audit_context = _db_audit_context(action="comment_delete", current_user=current_user, request=request)
+
+    def _delete_comment_tx(cursor):
+        cursor.execute(
+            "UPDATE Comment SET IsActive = FALSE WHERE CommentID = %s AND IsActive = TRUE",
+            (comment_id,),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Comment not found")
+        cursor.execute(
+            "UPDATE Post SET CommentCount = GREATEST(CommentCount - 1, 0) WHERE PostID = %s",
+            (comment_owner["PostID"],),
+        )
+
+    execute_transaction(_delete_comment_tx, audit_context=audit_context)
+
     _audit_log(
         action="comment_delete",
         actor_id=member_id,
@@ -1245,32 +1318,43 @@ def create_member_admin(payload: AdminMemberCreate, request: Request, current_us
     if len(payload.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
-    member_id = execute_query(
-        """
-        INSERT INTO Member (Name, Email, ContactNumber, CollegeID, Role, Department, Age, Bio)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            payload.name.strip(),
-            payload.email.strip(),
-            payload.contact_number.strip(),
-            payload.college_id.strip(),
-            payload.role,
-            payload.department.strip(),
-            payload.age,
-            payload.bio,
-        ),
-        audit_context=_db_audit_context(action="admin_member_create", current_user=current_user, request=request),
-    )
     password_hash = pwd_context.hash(payload.password)
-    execute_query(
-        """
-        INSERT INTO AuthCredential (MemberID, PasswordHash, PasswordAlgo)
-        VALUES (%s, %s, 'bcrypt')
-        """,
-        (member_id, password_hash),
-        audit_context=_db_audit_context(action="admin_member_create", current_user=current_user, request=request),
-    )
+    audit_context = _db_audit_context(action="admin_member_create", current_user=current_user, request=request)
+
+    def _create_member_tx(cursor):
+        cursor.execute(
+            """
+            INSERT INTO Member (Name, Email, ContactNumber, CollegeID, Role, Department, Age, Bio)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                payload.name.strip(),
+                payload.email.strip(),
+                payload.contact_number.strip(),
+                payload.college_id.strip(),
+                payload.role,
+                payload.department.strip(),
+                payload.age,
+                payload.bio,
+            ),
+        )
+        new_member_id = int(cursor.lastrowid)
+        cursor.execute(
+            """
+            INSERT INTO AuthCredential (MemberID, PasswordHash, PasswordAlgo)
+            VALUES (%s, %s, 'bcrypt')
+            """,
+            (new_member_id, password_hash),
+        )
+        return new_member_id
+
+    try:
+        member_id = execute_transaction(_create_member_tx, audit_context=audit_context)
+    except DatabaseQueryError as exc:
+        if exc.error_code == 1062:
+            raise HTTPException(status_code=400, detail="Email or CollegeID already exists")
+        raise
+
     _audit_log(
         action="admin_member_create",
         actor_id=current_user.get("member_id"),

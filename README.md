@@ -191,253 +191,166 @@ print(db.list_tables())
 - Primary key type is integer (`int`) to match B+ Tree indexing.
 - Table-level and database-level JSON snapshot persistence is available for recovery testing.
 
-## Module B: Local API, UI, and Security (SubTask 1, 2, and 3)
 
-This section documents the implementation status for Module B SubTask 1, SubTask 2, and SubTask 3.
+## Module B (Assignment 3): Concurrency, Failure Simulation, and Stress Testing
 
-### Scope Covered
+This repository now includes a dedicated Module B runner for Assignment 3 validation:
 
-- SubTask 1: Local environment setup and core/project data integrity
-- SubTask 2: Session-validated APIs and web UI for CRUD + member portfolio + follow/follower flows
-- SubTask 3: Strict RBAC and security logging with unauthorized direct-DB-change traceability
+- Script: `Module_B/performance/run_module_b_concurrency_stress.py`
+- Output artifact: `Module_B/performance/module_b_concurrency_report.json`
 
-### Module B Structure
+What it executes in one run:
 
-```text
-Module_B/
-|-- requirements.txt
-|-- app/
-|   |-- main.py              # FastAPI app, auth/session, portfolio, post/comment CRUD
-|   |-- database.py          # MySQL connection helper
-|   |-- test_db.py           # DB connectivity smoke test
-|   `-- static/
-|       |-- login.html       # Login page
-|       |-- signup.html      # Optional demo signup page
-|       |-- portfolio.html   # My portfolio page
-|       |-- member-profile.html # Other member profile page (read-only + follow)
-|       |-- search.html      # Member search page
-|       |-- create-post.html # Dedicated create post page
-|       |-- posts.html       # Dedicated posts listing page
-|       |-- app.js           # Frontend logic and navigation
-|       `-- styles.css       # Shared styles
-|-- sql/
-|   |-- schema.sql           # Core + project table schema with FK constraints
-|   |-- sample_data.sql      # Demo dataset
-|   `-- sample_passwords.txt # Sample IDs/emails mapped to shared demo password
-`-- logs/
-  `-- audit.log            # API security audit trail
-```
+- Concurrent usage simulation:
+  - High-volume parallel `GET /posts` requests
+  - Captures success rate, throughput, and latency (`avg`, `p50`, `p95`)
+- Race-condition test (critical operation):
+  - Many concurrent `POST /members/{member_id}/follow` attempts
+  - Verifies final relationship cardinality is exactly one
+- Failure simulation:
+  - Mixed valid and intentionally invalid concurrent `POST /posts/{post_id}/comments`
+  - Verifies failed operations do not cause partial count inconsistencies
+- Consistency checks:
+  - Validates `Post.LikeCount` vs `Like` rows
+  - Validates `Post.CommentCount` vs active `Comment` rows
 
-### Setup (Module B)
+### Reproduce results (step-by-step commands)
 
-1. Install Module B dependencies:
+Run the following from Windows PowerShell (from your cloned project root).
 
-```bash
-pip install -r Module_B/requirements.txt
-```
-
-2. Run the schema and load sample data in local MySQL:
-
-```sql
-SOURCE Module_B/sql/schema.sql;
-SOURCE Module_B/sql/sample_data.sql;
-```
-
-Sample login note:
-
-- `Module_B/sql/sample_passwords.txt` contains the sample user IDs/emails and their demo credentials.
-- All seeded sample users share the same password: `password123`.
-
-If you are on Windows PowerShell, set the DB password and JWT Secret Key environment variables before starting the API:
+1. Install Module B dependencies.
 
 ```powershell
-$env:DB_PASSWORD="<your-mysql-password>"
-$jwt = [Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))
-$env:JWT_SECRET_KEY = $jwt
+python -m pip install -r Module_B/requirements.txt
 ```
 
-Run the Live UI:
-
-```
-cd Module_B/app
-uvicorn main:app --reload --port 8001
-```
-
-Optional (persist across new PowerShell sessions):
+2. Add DB password and JWT key as environment variables.
 
 ```powershell
-setx DB_PASSWORD "<your-mysql-password>"
-setx JWT_SECRET_KEY "<your-random-secret>"
+$env:DB_HOST = "localhost"
+$env:DB_USER = "root"
+$env:DB_PASSWORD = "<your-mysql-password>"
+$env:JWT_SECRET_KEY = [Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))
 ```
 
-**DON'T TRY TO SET THE PASSWORD OR KEY IN database.py**
+3. Ensure MySQL service is running.
 
-## Module B SubTask 4 and 5 (Indexing + Benchmarking)
+4. Run SQL schema and sample data dumps.
 
-### Benchmark workflow used in report.ipynb
+```powershell
+mysql -u "$env:DB_USER" -p"$env:DB_PASSWORD" -e "SOURCE Module_B/sql/schema.sql; SOURCE Module_B/sql/sample_data.sql;"
+```
 
-- Benchmarking is executed inside `Module_B/report.ipynb` using a single consolidated workflow cell.
-- The notebook runs two comparable stages with the same parameters:
-  - `before_indexes`: optimization indexes are removed.
-  - `after_indexes`: optimization indexes are created.
-- API benchmark candidates are discovered automatically from FastAPI OpenAPI metadata.
-- Route-to-benchmark mapping is applied for assignment-scoped queries (`list_posts`, `list_comments`).
-- Each stage captures:
-  - SQL latency metrics (`avg`, `median`, `p95`, `min`, `max`)
-  - API latency metrics (`avg`, `median`, `p95`, `min`, `max`)
-  - `EXPLAIN` plan details (`type`, `key`, `rows`, `extra`)
-  - per-query `planning_ms`, `execution_ms`, and `scan_type`
+If `mysql` is not in PATH, use your local MySQL installation path for `mysql.exe`.
 
-### Planning-time note (MySQL)
+5. Run the app (Terminal A).
 
-- MySQL does not expose PostgreSQL-style planning time directly.
-- The report records planning as a labeled proxy metric:
-  - `planning_metric_method = "MySQL EXPLAIN wall-time proxy"`
+```powershell
+Set-Location Module_B/app
+python -m uvicorn main:app --host 127.0.0.1 --port 8001
+```
 
-This keeps the benchmark evidence transparent and MySQL-compatible.
+6. Run the Module B stress/failure test script (Terminal B in project root).
 
-### Targeted indexes and API mapping
+```powershell
+$env:DB_HOST = "localhost"
+$env:DB_USER = "root"
+$env:DB_PASSWORD = "<your-mysql-password>"
+python Module_B/performance/run_module_b_concurrency_stress.py --base-url http://127.0.0.1:8001 --username rahul.sharma@iitgn.ac.in --password password123 --post-id 1 --race-requests 200 --failure-requests 120 --stress-requests 1000
+```
 
-1. `idx_post_active_postdate_postid ON Post(IsActive, PostDate DESC, PostID DESC)`
-   - API query pattern: post feed listing
+Expected output summary:
 
-- Clauses targeted: `WHERE p.IsActive = TRUE` with visibility filtering, `ORDER BY p.PostDate DESC, p.PostID DESC`
+- `overall_pass: true`
+- `race_passed: true`
+- `failure_simulation_passed: true`
+- `stress_passed: true`
 
-2. `idx_comment_post_active_date ON Comment(PostID, IsActive, CommentDate ASC)`
-   - API query pattern: comments under a post
-   - Clauses targeted: `WHERE c.PostID = ? AND c.IsActive = TRUE`, `ORDER BY c.CommentDate ASC`
+Generated artifact:
 
-Schema location: `Module_B/sql/schema.sql`
+- `Module_B/performance/module_b_concurrency_report.json`
 
-### Evidence artifacts
+### Latest executed run (5 April 2026)
 
-- Benchmark output JSON (same params for both stages, API + SQL timings, EXPLAIN):
-  - `Module_B/performance/index_benchmark_results.json`
-- Interactive benchmark/report notebook:
-  - `Module_B/report.ipynb`
+Source artifact:
 
-The JSON includes:
+- `Module_B/performance/module_b_concurrency_report.json`
 
-- benchmark parameters and discovered candidate routes (`discovery`)
-- both benchmark stages with SQL/API metrics and EXPLAIN output (`stages`)
-- computed speedups (`speedup`)
-- required before/after query metrics (`query_metrics`)
+Executed configuration:
 
-### Latest measured impact
+- Base URL: `http://127.0.0.1:8001`
+- User: `rahul.sharma@iitgn.ac.in`
+- Race test: `200` requests, `40` workers
+- Failure simulation: `120` requests, `24` workers
+- Stress test: `1000` requests, `80` workers
 
-- SQL speedup:
-  - posts: `1.239`
-  - comments: `1.320`
-- API speedup:
-  - posts: `0.944`
-  - comments: `1.111`
-- The benchmark values are environment-dependent and are regenerated from the notebook run.
-- Use `Module_B/performance/index_benchmark_results.json` as the source of truth for current speedups and before/after metrics.
+Observed outcomes:
 
-4. Open UI:
+- `overall_pass = true`
+- `race_follow_test.race_passed = true`
+- `failure_simulation.failure_simulation_passed = true`
+- `stress_reads.stress_passed = true`
 
-- http://127.0.0.1:8001/
+Measured metrics:
 
-### SubTask 1: Local Environment Setup and Data Integrity
+- Race-condition test (`POST /members/{member_id}/follow`):
+  - Success responses: `200/200`
+  - Final relation count (`FollowerID`, `FollowingID`): `1`
+  - Latency: avg `190.882 ms`, p95 `250.252 ms`
+- Failure simulation (`POST /posts/{post_id}/comments`, mixed valid+invalid):
+  - HTTP status histogram: `200=60`, `400=60`
+  - Expected comment delta: `60`, actual comment delta: `60`
+  - Cleanup rows soft-deleted: `60`
+  - Post counter consistency remained valid before and after test
+- Stress test (parallel `GET /posts`):
+  - Success rate: `1.0` (`1000/1000`)
+  - Throughput: `295.85 req/s`
+  - Latency: avg `259.644 ms`, p95 `300.963 ms`
 
-Implemented:
+### Transaction and race-safety hardening in API layer
 
-- Core identity/auth separation:
-  - `Member` table stores profile/core member data.
-  - `AuthCredential` stores login credentials (linked 1:1 to `Member`).
-- Project-specific tables (`Post`, `Comment`, `Follow`, `GroupMember`, etc.) are separated from credential storage.
-- Referential integrity is enforced through foreign keys with cascades.
-- Schema includes business-rule triggers and consistency constraints.
+For Module B Assignment 3 correctness under concurrent writes, critical multi-step write paths in `Module_B/app/main.py` now execute in single DB transactions using `execute_transaction` from `Module_B/app/database.py`:
 
-Evidence in code:
+- `POST /signup` (Member + AuthCredential)
+- `POST /admin/members` (Member + AuthCredential)
+- `POST /members/{member_id}/follow` (idempotent under races)
+- `POST /posts/{post_id}/like/toggle` (like row + counter update)
+- `POST /posts/{post_id}/comments` (comment row + counter update)
+- `DELETE /comments/{comment_id}` (soft-delete + counter update)
 
-- `Module_B/sql/schema.sql`:
-  - `CREATE TABLE Member`
-  - `CREATE TABLE AuthCredential` with `FOREIGN KEY (MemberID) REFERENCES Member(MemberID) ON DELETE CASCADE`
-  - Project tables with `FOREIGN KEY ... ON DELETE CASCADE`
+### Module B changes made for Assignment 3 spec compliance
 
-### SubTask 2: API and UI Development
+The following changes were implemented to satisfy concurrent workload, failure handling, and correctness requirements.
 
-Implemented APIs (session-aware):
+1. Atomic multi-step write execution
 
-- Auth/session:
-  - `POST /signup` (optional demo path; creates `Student` account)
-  - `POST /login`
-  - `GET /isAuth`
-  - `POST /logout`
-- Portfolio:
-  - `GET /portfolio/{member_id}`
-  - `PUT /portfolio/{member_id}`
-- Follow graph:
-  - `GET /members/{member_id}/followers`
-  - `GET /members/{member_id}/following`
-  - `POST /members/{member_id}/follow`
-  - `DELETE /members/{member_id}/follow`
-- Project table CRUD (`Post`):
-  - `POST /posts`
-  - `GET /posts`
-  - `GET /posts/{post_id}`
-  - `PUT /posts/{post_id}`
-  - `DELETE /posts/{post_id}`
-- Additional project CRUD (`Comment`):
-  - `POST /posts/{post_id}/comments`
-  - `GET /posts/{post_id}/comments`
-  - `PUT /comments/{comment_id}`
-  - `DELETE /comments/{comment_id}`
+- Added `execute_transaction(...)` in `Module_B/app/database.py` for explicit begin/commit/rollback behavior.
+- Added DB error-code propagation (`DatabaseQueryError.error_code`) to handle duplicate-key races cleanly.
 
-Implemented web UI pages:
+2. Race-condition control for shared operations
 
-- `login.html`: authentication page
-- `signup.html`: optional demo self-signup page
-- `portfolio.html`: own portfolio (self profile and edits)
-- `member-profile.html`: read-only view of other member portfolios + follow toggle + follower/following lists + member posts
-- `search.html`: member search page for navigation/discovery
-- `create-post.html`: dedicated create-post form
-- `posts.html`: dedicated all-posts listing with edit/delete controls
-  - Current behavior: loads the latest 30 posts per request (`GET /posts?limit=30&offset=0`).
+- Updated follow creation flow in `POST /members/{member_id}/follow` to be idempotent under concurrent attempts.
+- Updated post like toggle flow in `POST /posts/{post_id}/like/toggle` to perform row-level lock/read-modify-write in one transaction.
 
-Session validation behavior:
+3. Failure handling without partial writes
 
-- Protected APIs are guarded using local JWT session validation dependency.
-- Login uses bcrypt hash verification only (no dummy-password fallback).
-- UI stores session locally and redirects unauthenticated users to login.
+- Updated comment creation and deletion flows to maintain `Post.CommentCount` atomically with `Comment` row writes.
+- Updated signup/admin member creation to ensure `Member` and `AuthCredential` are always inserted together or rolled back together.
 
-Member Portfolio access behavior:
+4. Stress and correctness validation tooling
 
-- Only authenticated users can access portfolio pages/endpoints.
-- Any authenticated user can view any member profile (read-only).
-- Editing remains restricted to own profile or Admin via `PUT /portfolio/{member_id}`.
-- Users can follow/unfollow other members and view follower/following lists in the member profile page.
+- Added `Module_B/performance/run_module_b_concurrency_stress.py` to execute:
+  - concurrent usage test
+  - race-condition test
+  - failure simulation test
+  - high-load stress test
+- Added consistency assertions in the runner for:
+  - `Post.LikeCount` vs `Like` rows
+  - `Post.CommentCount` vs active `Comment` rows
 
-### SubTask 3: Role-Based Access Control (RBAC) and Security Logging
+5. ACID-oriented validation evidence (Module B scope)
 
-Implemented RBAC behavior:
-
-- Admin-only actions are enforced for core administrative operations:
-  - Member management (`/admin/members`, `/admin/members/{member_id}`)
-- Official member creation path is admin-managed via `/admin/members`.
-- Public `/signup` is kept only as an optional demo convenience and always creates `Student` role accounts.
-- Regular users are restricted to their own modifiable records for portfolio/posts/comments where applicable.
-- Post permissions are intentionally stricter: only post owners can edit posts; Admin can delete any post (including posts by other members).
-- Unauthorized modification attempts return 403 and are logged.
-
-Implemented logging behavior:
-
-- Local file-based audit log is written to:
-  - `Module_B/logs/audit.log`
-- API write actions and denied attempts are captured with actor, endpoint, method, table, and outcome metadata.
-- Admin endpoint to inspect API audit trail:
-  - `GET /admin/audit-log`
-
-Direct database modification traceability (unauthorized detection):
-
-- Dedicated DB write log table:
-  - `ApiWriteLog` in `Module_B/sql/schema.sql`
-- Triggers record write source for key tables (`Member`, `Post`, `Comment`, `GroupMember`, `Follow`, `Like`) and classify writes as:
-  - `API` (authorized session-validated API write)
-  - `DIRECT_DB` (direct SQL write, treated as unauthorized)
-- Admin endpoint for DB-level change review:
-  - `GET /admin/db-change-log`
-  - `GET /admin/db-change-log?unauthorized_only=true`
-
-This ensures any direct DB write that bypasses API/session validation is easily identifiable during log review.
+- Atomicity: multi-step writes are wrapped in transactions.
+- Consistency: pre/post consistency checks pass in generated report.
+- Isolation (practical): race test confirms single follow edge under 200 concurrent attempts.
+- Durability: committed changes are persisted in MySQL and captured in report artifacts.
