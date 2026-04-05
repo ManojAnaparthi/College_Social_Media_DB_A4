@@ -63,26 +63,6 @@ python -m pip install -r Module_A/requirements.txt
 
 If you use Conda, run with your Conda Python interpreter instead of `python3` from Windows app aliases.
 
-## Run Performance Tests
-
-From project root:
-
-```bash
-python Module_A/database/run_performance_tests.py
-```
-
-Alternative (from Module_A/database folder):
-
-```bash
-python run_performance_tests.py
-```
-
-This runs performance testing for different random key set sizes and generates:
-
-- Performance charts in `Module_A/database/performance_results_jpgs/`
-- Benchmark JSON in `Module_A/database/visualizations/benchmark_results.json`
-
-
 ## Module A: ACID Validation for B+ Tree Database (Assignment 3)
 
 ### Overview
