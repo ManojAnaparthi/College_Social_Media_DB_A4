@@ -241,6 +241,30 @@ FROM (
 GROUP BY MemberID
 HAVING COUNT(*) > 1;
 
+SELECT 'Post cross-shard duplicate pairs' AS Check_label,
+       COUNT(*) AS Duplicates
+FROM (
+    SELECT PostID FROM shard_0_post
+    UNION ALL
+    SELECT PostID FROM shard_1_post
+    UNION ALL
+    SELECT PostID FROM shard_2_post
+) all_post_ids
+GROUP BY PostID
+HAVING COUNT(*) > 1;
+
+SELECT 'Comment cross-shard duplicate pairs' AS Check_label,
+       COUNT(*) AS Duplicates
+FROM (
+    SELECT CommentID FROM shard_0_comment
+    UNION ALL
+    SELECT CommentID FROM shard_1_comment
+    UNION ALL
+    SELECT CommentID FROM shard_2_comment
+) all_comment_ids
+GROUP BY CommentID
+HAVING COUNT(*) > 1;
+
 -- ============================================================================
 -- End of Sub-Task 2
 -- ============================================================================

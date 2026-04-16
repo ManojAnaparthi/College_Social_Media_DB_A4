@@ -40,17 +40,23 @@ shard_id = MemberID % 3
 ### 3. Estimated Distribution and Skew Risk
 
 #### Current sample estimate (from seed data)
-- Members: IDs 1..20 produce near-even distribution across 3 shards
-  - Shard 0: 6 members
-  - Shard 1: 7 members
-  - Shard 2: 7 members
+- Members (20 rows): IDs 1..20 produce near-even distribution across 3 shards
+  - Shard 0: 6
+  - Shard 1: 7
+  - Shard 2: 7
 
-- Posts (using post owner MemberID from sample data):
-  - Shard 0: 4 posts
-  - Shard 1: 9 posts
-  - Shard 2: 7 posts
+- Posts (20 rows, sharded by author `MemberID`):
+  - Shard 0: 4
+  - Shard 1: 9
+  - Shard 2: 7
 
-The post distribution is acceptable for a small sample, but it already shows activity skew.
+- Comments (20 rows, sharded by author `MemberID`):
+  - Shard 0: 6
+  - Shard 1: 11
+  - Shard 2: 3
+
+These post/comment counts come from the current sample workload and show realistic activity skew (power users), even when the shard key itself is reasonable.
+
 
 #### Skew risks to note
 - Power users can create many posts/comments and overload one shard.
@@ -61,7 +67,7 @@ The post distribution is acceptable for a small sample, but it already shows act
 - Department is available but low-cardinality and likely skewed.
 - Range-based MemberID sharding could create hot future shards as IDs increase.
 
-Hence, hash(MemberID) is the most practical and defensible choice for this codebase.
+Hence, hash(MemberID) is the most practical choice for this codebase.
 
 ## Sub-task 2: Implement Data Partitioning
 
@@ -115,7 +121,7 @@ mysql -u root -p college_social_media < sql/sharding.sql
 
 **File: `app/shard_router.py`**
 
-Central routing module that exposes three helpers:
+Central routing module that has three helpers:
 
 ```python
 get_shard_id(member_id)           # → 0, 1, or 2
