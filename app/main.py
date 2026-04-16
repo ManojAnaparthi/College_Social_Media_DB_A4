@@ -10,7 +10,15 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
-from database import DatabaseQueryError, execute_query, execute_transaction
+from database import (
+    DatabaseQueryError,
+    execute_query,
+    execute_query_all_shards,
+    execute_query_on_shard,
+    execute_transaction,
+    execute_transaction_on_shard,
+    is_distributed_shards_enabled,
+)
 from shard_router import ALL_SHARDS, all_shard_tables, get_shard_id, get_shard_table
 
 app = FastAPI()
@@ -162,8 +170,83 @@ def _verify_password(plain_password: str, stored_hash: str) -> bool:
         return False
 
 
+def _query_by_member(member_id: int, query: str, params=None, *, fetchall=False, fetchone=False, audit_context=None):
+    if is_distributed_shards_enabled():
+        return execute_query_on_shard(
+            get_shard_id(member_id),
+            query,
+            params,
+            fetchall=fetchall,
+            fetchone=fetchone,
+            audit_context=audit_context,
+        )
+    return execute_query(query, params, fetchall=fetchall, fetchone=fetchone, audit_context=audit_context)
+
+
+def _transaction_by_member(member_id: int, tx_fn, *, audit_context=None):
+    if is_distributed_shards_enabled():
+        return execute_transaction_on_shard(get_shard_id(member_id), tx_fn, audit_context=audit_context)
+    return execute_transaction(tx_fn, audit_context=audit_context)
+
+
+def _query_all_member_shards(query: str, params=None) -> list[dict]:
+    if is_distributed_shards_enabled():
+        return execute_query_all_shards(query, params)
+    rows: list[dict] = []
+    for table in all_shard_tables("member"):
+        rows.extend(execute_query(query.format(table=table), params, fetchall=True))
+    return rows
+
+
+def _find_post_shard(post_id: int) -> int | None:
+    if is_distributed_shards_enabled():
+        for shard_id in ALL_SHARDS:
+            row = execute_query_on_shard(
+                shard_id,
+                "SELECT PostID FROM Post WHERE PostID = %s AND IsActive = TRUE",
+                (post_id,),
+                fetchone=True,
+            )
+            if row:
+                return shard_id
+        return None
+
+    for shard_id in ALL_SHARDS:
+        table = f"shard_{shard_id}_post"
+        row = execute_query(f"SELECT PostID FROM {table} WHERE PostID = %s AND IsActive = TRUE", (post_id,), fetchone=True)
+        if row:
+            return shard_id
+    return None
+
+
+def _find_comment_shard(comment_id: int) -> int | None:
+    if is_distributed_shards_enabled():
+        for shard_id in ALL_SHARDS:
+            row = execute_query_on_shard(
+                shard_id,
+                "SELECT CommentID FROM Comment WHERE CommentID = %s AND IsActive = TRUE",
+                (comment_id,),
+                fetchone=True,
+            )
+            if row:
+                return shard_id
+        return None
+
+    for shard_id in ALL_SHARDS:
+        table = f"shard_{shard_id}_comment"
+        row = execute_query(
+            f"SELECT CommentID FROM {table} WHERE CommentID = %s AND IsActive = TRUE",
+            (comment_id,),
+            fetchone=True,
+        )
+        if row:
+            return shard_id
+    return None
+
+
 def _is_following(follower_id: int, following_id: int) -> bool:
-    row = execute_query(
+    row = _query_by_member(
+        follower_id,
         """
         SELECT 1
         FROM Follow
@@ -176,12 +259,14 @@ def _is_following(follower_id: int, following_id: int) -> bool:
 
 
 def _get_follow_counts(member_id: int) -> tuple[int, int]:
-    followers = execute_query(
+    followers = _query_by_member(
+        member_id,
         "SELECT COUNT(*) AS c FROM Follow WHERE FollowingID = %s",
         (member_id,),
         fetchone=True,
     )
-    following = execute_query(
+    following = _query_by_member(
+        member_id,
         "SELECT COUNT(*) AS c FROM Follow WHERE FollowerID = %s",
         (member_id,),
         fetchone=True,
@@ -190,8 +275,7 @@ def _get_follow_counts(member_id: int) -> tuple[int, int]:
 
 
 def _get_visible_post(post_id: int, member_id: int):
-    return execute_query(
-        """
+    query = """
         SELECT
             p.PostID,
             p.MemberID,
@@ -212,10 +296,14 @@ def _get_visible_post(post_id: int, member_id: int):
                   )
               )
           )
-        """,
-        (post_id, member_id, member_id),
-        fetchone=True,
-    )
+    """
+    if is_distributed_shards_enabled():
+        shard_id = _find_post_shard(post_id)
+        if shard_id is None:
+            return None
+        return execute_query_on_shard(shard_id, query, (post_id, member_id, member_id), fetchone=True)
+
+    return execute_query(query, (post_id, member_id, member_id), fetchone=True)
     
 # Dependency: Session validation
 def verify_session_token(session_token: str = Header(None, alias="session-token")):
@@ -380,7 +468,7 @@ def get_portfolio(member_id: int, current_user: dict = Depends(verify_session_to
         FROM Member
         WHERE MemberID = %s
     """
-    portfolio = execute_query(query, (member_id,), fetchone=True)
+    portfolio = _query_by_member(member_id, query, (member_id,), fetchone=True)
     
     if not portfolio:
         raise HTTPException(status_code=404, detail="Member not found.")
@@ -408,17 +496,29 @@ def search_members(
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
     term = f"%{q.strip()}%"
-    rows = execute_query(
-        """
-        SELECT MemberID, Name, Email, Department, Role, Bio
-        FROM Member
-        WHERE Name LIKE %s OR Email LIKE %s
-        ORDER BY Name ASC, MemberID ASC
-        LIMIT %s
-        """,
-        (term, term, limit),
-        fetchall=True,
-    )
+    if is_distributed_shards_enabled():
+        rows = execute_query_all_shards(
+            """
+            SELECT MemberID, Name, Email, Department, Role, Bio
+            FROM Member
+            WHERE Name LIKE %s OR Email LIKE %s
+            """,
+            (term, term),
+        )
+        rows.sort(key=lambda r: (r["Name"], r["MemberID"]))
+        rows = rows[:limit]
+    else:
+        rows = execute_query(
+            """
+            SELECT MemberID, Name, Email, Department, Role, Bio
+            FROM Member
+            WHERE Name LIKE %s OR Email LIKE %s
+            ORDER BY Name ASC, MemberID ASC
+            LIMIT %s
+            """,
+            (term, term, limit),
+            fetchall=True,
+        )
     return {
         "message": "Members retrieved successfully",
         "query": q,
@@ -437,11 +537,12 @@ def list_followers(
     if current_user.get("member_id") is None:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
-    member_exists = execute_query("SELECT MemberID FROM Member WHERE MemberID = %s", (member_id,), fetchone=True)
+    member_exists = _query_by_member(member_id, "SELECT MemberID FROM Member WHERE MemberID = %s", (member_id,), fetchone=True)
     if not member_exists:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    rows = execute_query(
+    rows = _query_by_member(
+        member_id,
         """
         SELECT f.FollowID, f.FollowDate, m.MemberID, m.Name, m.Email, m.Department, m.Role
         FROM Follow f
@@ -466,11 +567,12 @@ def list_following(
     if current_user.get("member_id") is None:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
-    member_exists = execute_query("SELECT MemberID FROM Member WHERE MemberID = %s", (member_id,), fetchone=True)
+    member_exists = _query_by_member(member_id, "SELECT MemberID FROM Member WHERE MemberID = %s", (member_id,), fetchone=True)
     if not member_exists:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    rows = execute_query(
+    rows = _query_by_member(
+        member_id,
         """
         SELECT f.FollowID, f.FollowDate, m.MemberID, m.Name, m.Email, m.Department, m.Role
         FROM Follow f
@@ -495,7 +597,7 @@ def follow_member(member_id: int, request: Request, current_user: dict = Depends
     if follower_id == member_id:
         raise HTTPException(status_code=400, detail="You cannot follow yourself")
 
-    target = execute_query("SELECT MemberID FROM Member WHERE MemberID = %s", (member_id,), fetchone=True)
+    target = _query_by_member(member_id, "SELECT MemberID FROM Member WHERE MemberID = %s", (member_id,), fetchone=True)
     if not target:
         raise HTTPException(status_code=404, detail="Member not found")
 
@@ -516,7 +618,7 @@ def follow_member(member_id: int, request: Request, current_user: dict = Depends
             raise RuntimeError("Failed to resolve follow relationship after write")
         return int(row["FollowID"]), created
 
-    follow_id, created = execute_transaction(_follow_tx, audit_context=audit_context)
+    follow_id, created = _transaction_by_member(follower_id, _follow_tx, audit_context=audit_context)
 
     _audit_log(
         action="follow_create" if created else "follow_create_noop",
@@ -547,7 +649,8 @@ def unfollow_member(member_id: int, request: Request, current_user: dict = Depen
     if follower_id is None:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
-    follow_row = execute_query(
+    follow_row = _query_by_member(
+        follower_id,
         "SELECT FollowID FROM Follow WHERE FollowerID = %s AND FollowingID = %s",
         (follower_id, member_id),
         fetchone=True,
@@ -555,7 +658,8 @@ def unfollow_member(member_id: int, request: Request, current_user: dict = Depen
     if not follow_row:
         raise HTTPException(status_code=404, detail="Follow relationship not found")
 
-    execute_query(
+    _query_by_member(
+        follower_id,
         "DELETE FROM Follow WHERE FollowID = %s",
         (follow_row["FollowID"],),
         audit_context=_db_audit_context(action="follow_delete", current_user=current_user, request=request),
@@ -626,7 +730,8 @@ def update_portfolio(
     params.append(member_id)
     
     # 3. Execute the update
-    execute_query(
+    _query_by_member(
+        member_id,
         query,
         tuple(params),
         audit_context=_db_audit_context(action="portfolio_update", current_user=current_user, request=request),
@@ -662,7 +767,8 @@ def create_post(post_data: PostCreate, request: Request, current_user: dict = De
         INSERT INTO Post (MemberID, Content, MediaURL, MediaType, Visibility)
         VALUES (%s, %s, %s, %s, %s)
     """
-    new_post_id = execute_query(
+    new_post_id = _query_by_member(
+        member_id,
         query,
         (member_id, post_data.content.strip(), post_data.media_url, post_data.media_type, post_data.visibility),
         audit_context=_db_audit_context(action="post_create", current_user=current_user, request=request),
@@ -731,7 +837,51 @@ def list_posts(
         ORDER BY p.PostDate DESC, p.PostID DESC
         LIMIT %s OFFSET %s
     """
-    posts = execute_query(query, (member_id, member_id, member_id, limit, offset), fetchall=True)
+    if is_distributed_shards_enabled():
+        posts = execute_query_all_shards(
+            """
+            SELECT
+                p.PostID,
+                p.MemberID,
+                m.Name AS AuthorName,
+                p.Content,
+                p.MediaURL,
+                p.MediaType,
+                p.PostDate,
+                p.LastEditDate,
+                p.Visibility,
+                p.LikeCount,
+                p.CommentCount,
+                EXISTS (
+                    SELECT 1
+                    FROM `Like` l
+                    WHERE l.MemberID = %s
+                      AND l.TargetType = 'Post'
+                      AND l.TargetID = p.PostID
+                ) AS ViewerHasLiked
+            FROM Post p
+            JOIN Member m ON p.MemberID = m.MemberID
+            WHERE p.IsActive = TRUE
+              AND (
+                  p.Visibility = 'Public'
+                  OR p.MemberID = %s
+                  OR (
+                      p.Visibility = 'Followers'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM Follow f
+                          WHERE f.FollowerID = %s
+                            AND f.FollowingID = p.MemberID
+                      )
+                  )
+              )
+            """,
+            (member_id, member_id, member_id),
+        )
+        posts.sort(key=lambda p: (p["PostDate"], p["PostID"]), reverse=True)
+        posts = posts[offset: offset + limit]
+    else:
+        posts = execute_query(query, (member_id, member_id, member_id, limit, offset), fetchall=True)
     return {"message": "Posts retrieved successfully", "count": len(posts), "data": posts}
 
 
@@ -748,7 +898,8 @@ def list_member_posts(
     if viewer_id is None:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
-    member_exists = execute_query(
+    member_exists = _query_by_member(
+        member_id,
         "SELECT MemberID FROM Member WHERE MemberID = %s",
         (member_id,),
         fetchone=True,
@@ -784,7 +935,7 @@ def list_member_posts(
             ORDER BY p.PostDate DESC, p.PostID DESC
             LIMIT %s OFFSET %s
         """
-        posts = execute_query(query, (viewer_id, member_id, limit, offset), fetchall=True)
+        posts = _query_by_member(member_id, query, (viewer_id, member_id, limit, offset), fetchall=True)
     else:
         query = """
             SELECT
@@ -825,7 +976,12 @@ def list_member_posts(
             ORDER BY p.PostDate DESC, p.PostID DESC
             LIMIT %s OFFSET %s
         """
-        posts = execute_query(query, (viewer_id, member_id, viewer_id, limit, offset), fetchall=True)
+        posts = _query_by_member(
+            member_id,
+            query,
+            (viewer_id, member_id, viewer_id, limit, offset),
+            fetchall=True,
+        )
 
     return {
         "message": "Member posts retrieved successfully",
@@ -883,7 +1039,13 @@ def get_post(post_id: int, current_user: dict = Depends(verify_session_token)):
               )
           )
     """
-    post = execute_query(query, (member_id, post_id, member_id, member_id), fetchone=True)
+    post_shard = _find_post_shard(post_id)
+    if post_shard is None:
+        raise HTTPException(status_code=404, detail="Post not found or not visible")
+    if is_distributed_shards_enabled():
+        post = execute_query_on_shard(post_shard, query, (member_id, post_id, member_id, member_id), fetchone=True)
+    else:
+        post = execute_query(query, (member_id, post_id, member_id, member_id), fetchone=True)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found or not visible")
     return {"message": "Post retrieved successfully", "data": post}
@@ -1004,7 +1166,7 @@ def create_comment(
         )
         return new_comment_id
 
-    comment_id = execute_transaction(_create_comment_tx, audit_context=audit_context)
+    comment_id = _transaction_by_member(member_id, _create_comment_tx, audit_context=audit_context)
 
     _audit_log(
         action="comment_create",
@@ -1030,7 +1192,34 @@ def list_comments(post_id: int, current_user: dict = Depends(verify_session_toke
     if not _get_visible_post(post_id, member_id):
         raise HTTPException(status_code=404, detail="Post not found or not visible")
 
-    comments = execute_query(
+    post_shard = _find_post_shard(post_id)
+    if post_shard is None:
+        raise HTTPException(status_code=404, detail="Post not found or not visible")
+
+    if is_distributed_shards_enabled():
+        comments = execute_query_on_shard(
+            post_shard,
+            """
+            SELECT
+                c.CommentID,
+                c.PostID,
+                c.MemberID,
+                m.Name AS AuthorName,
+                c.Content,
+                c.CommentDate,
+                c.LastEditDate,
+                c.LikeCount,
+                c.IsActive
+            FROM Comment c
+            JOIN Member m ON c.MemberID = m.MemberID
+            WHERE c.PostID = %s AND c.IsActive = TRUE
+            ORDER BY c.CommentDate ASC
+            """,
+            (post_id,),
+            fetchall=True,
+        )
+    else:
+        comments = execute_query(
         """
         SELECT
             c.CommentID,
@@ -1049,7 +1238,7 @@ def list_comments(post_id: int, current_user: dict = Depends(verify_session_toke
         """,
         (post_id,),
         fetchall=True,
-    )
+        )
     return {"message": "Comments retrieved successfully", "count": len(comments), "data": comments}
 
 
@@ -1069,11 +1258,23 @@ def update_comment(
     if not update_data.content.strip():
         raise HTTPException(status_code=400, detail="Comment content cannot be empty")
 
-    comment_owner = execute_query(
-        "SELECT CommentID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
-        (comment_id,),
-        fetchone=True,
-    )
+    comment_shard = _find_comment_shard(comment_id)
+    if comment_shard is None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if is_distributed_shards_enabled():
+        comment_owner = execute_query_on_shard(
+            comment_shard,
+            "SELECT CommentID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
+            (comment_id,),
+            fetchone=True,
+        )
+    else:
+        comment_owner = execute_query(
+            "SELECT CommentID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
+            (comment_id,),
+            fetchone=True,
+        )
     if not comment_owner or not comment_owner["IsActive"]:
         raise HTTPException(status_code=404, detail="Comment not found")
 
@@ -1091,15 +1292,27 @@ def update_comment(
         )
         raise HTTPException(status_code=403, detail="You do not have permission to modify this comment")
 
-    execute_query(
-        """
-        UPDATE Comment
-        SET Content = %s, LastEditDate = CURRENT_TIMESTAMP
-        WHERE CommentID = %s
-        """,
-        (update_data.content.strip(), comment_id),
-        audit_context=_db_audit_context(action="comment_update", current_user=current_user, request=request),
-    )
+    if is_distributed_shards_enabled():
+        execute_query_on_shard(
+            comment_shard,
+            """
+            UPDATE Comment
+            SET Content = %s, LastEditDate = CURRENT_TIMESTAMP
+            WHERE CommentID = %s
+            """,
+            (update_data.content.strip(), comment_id),
+            audit_context=_db_audit_context(action="comment_update", current_user=current_user, request=request),
+        )
+    else:
+        execute_query(
+            """
+            UPDATE Comment
+            SET Content = %s, LastEditDate = CURRENT_TIMESTAMP
+            WHERE CommentID = %s
+            """,
+            (update_data.content.strip(), comment_id),
+            audit_context=_db_audit_context(action="comment_update", current_user=current_user, request=request),
+        )
     _audit_log(
         action="comment_update",
         actor_id=member_id,
@@ -1122,11 +1335,23 @@ def delete_comment(comment_id: int, request: Request, current_user: dict = Depen
     if member_id is None:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
-    comment_owner = execute_query(
-        "SELECT CommentID, PostID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
-        (comment_id,),
-        fetchone=True,
-    )
+    comment_shard = _find_comment_shard(comment_id)
+    if comment_shard is None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if is_distributed_shards_enabled():
+        comment_owner = execute_query_on_shard(
+            comment_shard,
+            "SELECT CommentID, PostID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
+            (comment_id,),
+            fetchone=True,
+        )
+    else:
+        comment_owner = execute_query(
+            "SELECT CommentID, PostID, MemberID, IsActive FROM Comment WHERE CommentID = %s",
+            (comment_id,),
+            fetchone=True,
+        )
     if not comment_owner or not comment_owner["IsActive"]:
         raise HTTPException(status_code=404, detail="Comment not found")
 
@@ -1158,7 +1383,10 @@ def delete_comment(comment_id: int, request: Request, current_user: dict = Depen
             (comment_owner["PostID"],),
         )
 
-    execute_transaction(_delete_comment_tx, audit_context=audit_context)
+    if is_distributed_shards_enabled():
+        execute_transaction_on_shard(comment_shard, _delete_comment_tx, audit_context=audit_context)
+    else:
+        execute_transaction(_delete_comment_tx, audit_context=audit_context)
 
     _audit_log(
         action="comment_delete",
@@ -1182,11 +1410,23 @@ def update_post(post_id: int, update_data: PostUpdate, request: Request, current
     if member_id is None:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
-    post_owner = execute_query(
-        "SELECT PostID, MemberID, IsActive FROM Post WHERE PostID = %s",
-        (post_id,),
-        fetchone=True,
-    )
+    post_shard = _find_post_shard(post_id)
+    if post_shard is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if is_distributed_shards_enabled():
+        post_owner = execute_query_on_shard(
+            post_shard,
+            "SELECT PostID, MemberID, IsActive FROM Post WHERE PostID = %s",
+            (post_id,),
+            fetchone=True,
+        )
+    else:
+        post_owner = execute_query(
+            "SELECT PostID, MemberID, IsActive FROM Post WHERE PostID = %s",
+            (post_id,),
+            fetchone=True,
+        )
     if not post_owner or not post_owner["IsActive"]:
         raise HTTPException(status_code=404, detail="Post not found")
 
@@ -1228,11 +1468,19 @@ def update_post(post_id: int, update_data: PostUpdate, request: Request, current
     updates.append("LastEditDate = CURRENT_TIMESTAMP")
     query = f"UPDATE Post SET {', '.join(updates)} WHERE PostID = %s"
     params.append(post_id)
-    execute_query(
-        query,
-        tuple(params),
-        audit_context=_db_audit_context(action="post_update", current_user=current_user, request=request),
-    )
+    if is_distributed_shards_enabled():
+        execute_query_on_shard(
+            post_shard,
+            query,
+            tuple(params),
+            audit_context=_db_audit_context(action="post_update", current_user=current_user, request=request),
+        )
+    else:
+        execute_query(
+            query,
+            tuple(params),
+            audit_context=_db_audit_context(action="post_update", current_user=current_user, request=request),
+        )
     _audit_log(
         action="post_update",
         actor_id=member_id,
@@ -1255,11 +1503,23 @@ def delete_post(post_id: int, request: Request, current_user: dict = Depends(ver
     if member_id is None:
         raise HTTPException(status_code=401, detail="Invalid session payload")
 
-    post_owner = execute_query(
-        "SELECT PostID, MemberID, IsActive FROM Post WHERE PostID = %s",
-        (post_id,),
-        fetchone=True,
-    )
+    post_shard = _find_post_shard(post_id)
+    if post_shard is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if is_distributed_shards_enabled():
+        post_owner = execute_query_on_shard(
+            post_shard,
+            "SELECT PostID, MemberID, IsActive FROM Post WHERE PostID = %s",
+            (post_id,),
+            fetchone=True,
+        )
+    else:
+        post_owner = execute_query(
+            "SELECT PostID, MemberID, IsActive FROM Post WHERE PostID = %s",
+            (post_id,),
+            fetchone=True,
+        )
     if not post_owner or not post_owner["IsActive"]:
         raise HTTPException(status_code=404, detail="Post not found")
 
@@ -1277,11 +1537,19 @@ def delete_post(post_id: int, request: Request, current_user: dict = Depends(ver
         )
         raise HTTPException(status_code=403, detail="You do not have permission to delete this post")
 
-    execute_query(
-        "UPDATE Post SET IsActive = FALSE WHERE PostID = %s",
-        (post_id,),
-        audit_context=_db_audit_context(action="post_delete", current_user=current_user, request=request),
-    )
+    if is_distributed_shards_enabled():
+        execute_query_on_shard(
+            post_shard,
+            "UPDATE Post SET IsActive = FALSE WHERE PostID = %s",
+            (post_id,),
+            audit_context=_db_audit_context(action="post_delete", current_user=current_user, request=request),
+        )
+    else:
+        execute_query(
+            "UPDATE Post SET IsActive = FALSE WHERE PostID = %s",
+            (post_id,),
+            audit_context=_db_audit_context(action="post_delete", current_user=current_user, request=request),
+        )
     _audit_log(
         action="post_delete",
         actor_id=member_id,
@@ -1480,12 +1748,20 @@ def shard_info(current_user: dict = Depends(verify_session_token)):
     """
     info = {"num_shards": len(ALL_SHARDS), "shards": []}
     for shard_id in ALL_SHARDS:
-        member_table  = f"shard_{shard_id}_member"
-        post_table    = f"shard_{shard_id}_post"
-        comment_table = f"shard_{shard_id}_comment"
-        member_count  = execute_query(f"SELECT COUNT(*) AS c FROM {member_table}",  fetchone=True)["c"]
-        post_count    = execute_query(f"SELECT COUNT(*) AS c FROM {post_table}",    fetchone=True)["c"]
-        comment_count = execute_query(f"SELECT COUNT(*) AS c FROM {comment_table}", fetchone=True)["c"]
+        if is_distributed_shards_enabled():
+            member_table = "Member"
+            post_table = "Post"
+            comment_table = "Comment"
+            member_count = execute_query_on_shard(shard_id, "SELECT COUNT(*) AS c FROM Member", fetchone=True)["c"]
+            post_count = execute_query_on_shard(shard_id, "SELECT COUNT(*) AS c FROM Post", fetchone=True)["c"]
+            comment_count = execute_query_on_shard(shard_id, "SELECT COUNT(*) AS c FROM Comment", fetchone=True)["c"]
+        else:
+            member_table = f"shard_{shard_id}_member"
+            post_table = f"shard_{shard_id}_post"
+            comment_table = f"shard_{shard_id}_comment"
+            member_count = execute_query(f"SELECT COUNT(*) AS c FROM {member_table}", fetchone=True)["c"]
+            post_count = execute_query(f"SELECT COUNT(*) AS c FROM {post_table}", fetchone=True)["c"]
+            comment_count = execute_query(f"SELECT COUNT(*) AS c FROM {comment_table}", fetchone=True)["c"]
         info["shards"].append({
             "shard_id":      shard_id,
             "member_table":  member_table,
@@ -1510,11 +1786,15 @@ def shard_get_member(member_id: int, current_user: dict = Depends(verify_session
     shard_id    = get_shard_id(member_id)
     shard_table = get_shard_table("member", member_id)
 
-    row = execute_query(
-        f"SELECT * FROM {shard_table} WHERE MemberID = %s",
-        (member_id,),
-        fetchone=True,
-    )
+    if is_distributed_shards_enabled():
+        row = execute_query_on_shard(shard_id, "SELECT * FROM Member WHERE MemberID = %s", (member_id,), fetchone=True)
+        shard_table = "Member"
+    else:
+        row = execute_query(
+            f"SELECT * FROM {shard_table} WHERE MemberID = %s",
+            (member_id,),
+            fetchone=True,
+        )
     if not row:
         raise HTTPException(status_code=404, detail="Member not found in shard")
 
@@ -1543,18 +1823,34 @@ def shard_get_member_posts(
     shard_id    = get_shard_id(member_id)
     shard_table = get_shard_table("post", member_id)
 
-    rows = execute_query(
-        f"""
-        SELECT PostID, MemberID, Content, MediaURL, MediaType,
-               PostDate, Visibility, LikeCount, CommentCount, IsActive, ShardID
-        FROM   {shard_table}
-        WHERE  MemberID = %s AND IsActive = TRUE
-        ORDER  BY PostDate DESC
-        LIMIT  %s OFFSET %s
-        """,
-        (member_id, limit, offset),
-        fetchall=True,
-    )
+    if is_distributed_shards_enabled():
+        rows = execute_query_on_shard(
+            shard_id,
+            """
+            SELECT PostID, MemberID, Content, MediaURL, MediaType,
+                   PostDate, Visibility, LikeCount, CommentCount, IsActive
+            FROM Post
+            WHERE MemberID = %s AND IsActive = TRUE
+            ORDER BY PostDate DESC
+            LIMIT %s OFFSET %s
+            """,
+            (member_id, limit, offset),
+            fetchall=True,
+        )
+        shard_table = "Post"
+    else:
+        rows = execute_query(
+            f"""
+            SELECT PostID, MemberID, Content, MediaURL, MediaType,
+                   PostDate, Visibility, LikeCount, CommentCount, IsActive, ShardID
+            FROM   {shard_table}
+            WHERE  MemberID = %s AND IsActive = TRUE
+            ORDER  BY PostDate DESC
+            LIMIT  %s OFFSET %s
+            """,
+            (member_id, limit, offset),
+            fetchall=True,
+        )
     return {
         "message":     "Posts retrieved from shard",
         "shard_id":    shard_id,
@@ -1580,20 +1876,37 @@ def shard_list_all_posts(
     all_posts = []
     shard_meta = []
     for shard_id in ALL_SHARDS:
-        shard_table = f"shard_{shard_id}_post"
-        rows = execute_query(
-            f"""
-            SELECT PostID, MemberID, Content, MediaURL, MediaType,
-                   PostDate, Visibility, LikeCount, CommentCount, IsActive, ShardID
-            FROM   {shard_table}
-            WHERE  IsActive = TRUE
-              AND  Visibility = 'Public'
-            ORDER  BY PostDate DESC
-            LIMIT  %s
-            """,
-            (limit,),
-            fetchall=True,
-        )
+        if is_distributed_shards_enabled():
+            shard_table = "Post"
+            rows = execute_query_on_shard(
+                shard_id,
+                """
+                SELECT PostID, MemberID, Content, MediaURL, MediaType,
+                       PostDate, Visibility, LikeCount, CommentCount, IsActive
+                FROM Post
+                WHERE IsActive = TRUE
+                  AND Visibility = 'Public'
+                ORDER BY PostDate DESC
+                LIMIT %s
+                """,
+                (limit,),
+                fetchall=True,
+            )
+        else:
+            shard_table = f"shard_{shard_id}_post"
+            rows = execute_query(
+                f"""
+                SELECT PostID, MemberID, Content, MediaURL, MediaType,
+                       PostDate, Visibility, LikeCount, CommentCount, IsActive, ShardID
+                FROM   {shard_table}
+                WHERE  IsActive = TRUE
+                  AND  Visibility = 'Public'
+                ORDER  BY PostDate DESC
+                LIMIT  %s
+                """,
+                (limit,),
+                fetchall=True,
+            )
         shard_meta.append({"shard_id": shard_id, "rows_fetched_from_shard": len(rows)})
         all_posts.extend(rows)
 
@@ -1637,7 +1950,6 @@ def shard_create_post(
     audit_context = _db_audit_context(action="shard_post_create", current_user=current_user, request=request)
 
     def _shard_insert_tx(cursor):
-        # 1. Write to canonical table for transactional consistency
         cursor.execute(
             """
             INSERT INTO Post (MemberID, Content, MediaURL, MediaType, Visibility)
@@ -1646,21 +1958,26 @@ def shard_create_post(
             (member_id, post_data.content.strip(), post_data.media_url,
              post_data.media_type, post_data.visibility),
         )
-        new_post_id = int(cursor.lastrowid)
+        return int(cursor.lastrowid)
 
-        # 2. Mirror into the correct shard table
-        cursor.execute(
-            f"""
-            INSERT INTO {shard_table}
-                (PostID, MemberID, Content, MediaURL, MediaType, Visibility, ShardID)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (new_post_id, member_id, post_data.content.strip(), post_data.media_url,
-             post_data.media_type, post_data.visibility, shard_id),
-        )
-        return new_post_id
+    if is_distributed_shards_enabled():
+        new_post_id = execute_transaction_on_shard(shard_id, _shard_insert_tx, audit_context=audit_context)
+        shard_table = "Post"
+    else:
+        def _local_shard_insert_tx(cursor):
+            new_post_id = _shard_insert_tx(cursor)
+            cursor.execute(
+                f"""
+                INSERT INTO {shard_table}
+                    (PostID, MemberID, Content, MediaURL, MediaType, Visibility, ShardID)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (new_post_id, member_id, post_data.content.strip(), post_data.media_url,
+                 post_data.media_type, post_data.visibility, shard_id),
+            )
+            return new_post_id
 
-    new_post_id = execute_transaction(_shard_insert_tx, audit_context=audit_context)
+        new_post_id = execute_transaction(_local_shard_insert_tx, audit_context=audit_context)
 
     _audit_log(
         action="shard_post_create",
@@ -1697,18 +2014,34 @@ def shard_get_member_comments(
     shard_id    = get_shard_id(member_id)
     shard_table = get_shard_table("comment", member_id)
 
-    rows = execute_query(
-        f"""
-        SELECT CommentID, PostID, MemberID, Content,
-               CommentDate, LikeCount, IsActive, ShardID
-        FROM   {shard_table}
-        WHERE  MemberID = %s AND IsActive = TRUE
-        ORDER  BY CommentDate DESC
-        LIMIT  %s OFFSET %s
-        """,
-        (member_id, limit, offset),
-        fetchall=True,
-    )
+    if is_distributed_shards_enabled():
+        rows = execute_query_on_shard(
+            shard_id,
+            """
+            SELECT CommentID, PostID, MemberID, Content,
+                   CommentDate, LikeCount, IsActive
+            FROM Comment
+            WHERE MemberID = %s AND IsActive = TRUE
+            ORDER BY CommentDate DESC
+            LIMIT %s OFFSET %s
+            """,
+            (member_id, limit, offset),
+            fetchall=True,
+        )
+        shard_table = "Comment"
+    else:
+        rows = execute_query(
+            f"""
+            SELECT CommentID, PostID, MemberID, Content,
+                   CommentDate, LikeCount, IsActive, ShardID
+            FROM   {shard_table}
+            WHERE  MemberID = %s AND IsActive = TRUE
+            ORDER  BY CommentDate DESC
+            LIMIT  %s OFFSET %s
+            """,
+            (member_id, limit, offset),
+            fetchall=True,
+        )
     return {
         "message":     "Comments retrieved from shard",
         "shard_id":    shard_id,

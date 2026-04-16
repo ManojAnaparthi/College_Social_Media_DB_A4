@@ -113,6 +113,105 @@ Run the sharding script:
 mysql -u root -p college_social_media < sql/sharding.sql
 ```
 
+### Distributed Shard Deployment (Remote Assignment Environment)
+
+In the assignment deployment, sharding was executed on three real MySQL instances running on one remote host:
+
+- Host: `10.0.116.184`
+- Shard 0: port `3307`
+- Shard 1: port `3308`
+- Shard 2: port `3309`
+
+This means each shard is a separate database server process (separate port), not just separate tables in one local instance.
+
+#### Operational workflow used
+
+For each shard instance:
+
+1. Load schema into `maaps` database
+2. Load sample data
+3. Drop cross-shard FK constraints for `Post` and `Comment` (to avoid cascade deletions during horizontal filtering)
+4. Apply shard filter script to keep only that shard's partition by hash rule
+
+Applied filter rule:
+
+```
+shard_id = MemberID % 3
+```
+
+#### Why a no-trigger schema file was required
+
+Remote shard servers had binary logging enabled and restricted privileges, so trigger creation failed with:
+
+```
+ERROR 1419 (HY000): You do not have the SUPER privilege ...
+```
+
+To stay within assignment rules (no admin/system changes), deployment used `sql/schema_maaps_no_triggers.sql`, which preserves core tables and indexes but omits trigger definitions.
+
+#### Why FK removal was required before filtering
+
+The base schema defines FK relationships such as `Comment -> Post` and `Comment -> Member` with cascade behavior.
+If rows are filtered independently by shard, cross-shard parent-child references can trigger unintended cascade deletes.
+
+To prevent this, `sql/distributed_drop_cross_shard_fks.sql` was executed before shard filtering.
+
+#### Verified final shard distribution (20-row sample)
+
+- Shard 0 (`3307` / host `977af97a9799`):
+  - Member: 6
+  - Post: 4
+  - Comment: 6
+- Shard 1 (`3308` / host `2cffc9b7df77`):
+  - Member: 7
+  - Post: 9
+  - Comment: 11
+- Shard 2 (`3309` / host `5629a0278cb0`):
+  - Member: 7
+  - Post: 7
+  - Comment: 3
+
+These totals match hash-partition expectations for the provided sample workload and confirm that data was distributed across all three shards without loss.
+
+#### Runbook: Remote 3-Shard Setup
+
+Run the following from the project root (`College_Social_Media_DB_A4`):
+
+```bash
+# -----------------------------
+# Shard 1 (port 3308): keep MemberID % 3 = 1
+# -----------------------------
+mysql -h 10.0.116.184 -P 3308 -u maaps -p maaps < sql/schema_maaps_no_triggers.sql
+mysql -h 10.0.116.184 -P 3308 -u maaps -p maaps < sql/sample_data_maaps.sql
+mysql -h 10.0.116.184 -P 3308 -u maaps -p maaps < sql/distributed_drop_cross_shard_fks.sql
+mysql -h 10.0.116.184 -P 3308 -u maaps -p maaps < sql/distributed_shard1_filter.sql
+
+# -----------------------------
+# Shard 2 (port 3309): keep MemberID % 3 = 2
+# -----------------------------
+mysql -h 10.0.116.184 -P 3309 -u maaps -p maaps < sql/schema_maaps_no_triggers.sql
+mysql -h 10.0.116.184 -P 3309 -u maaps -p maaps < sql/sample_data_maaps.sql
+mysql -h 10.0.116.184 -P 3309 -u maaps -p maaps < sql/distributed_drop_cross_shard_fks.sql
+mysql -h 10.0.116.184 -P 3309 -u maaps -p maaps < sql/distributed_shard2_filter.sql
+
+# -----------------------------
+# Shard 0 (port 3307): keep MemberID % 3 = 0
+# -----------------------------
+mysql -h 10.0.116.184 -P 3307 -u maaps -p maaps < sql/schema_maaps_no_triggers.sql
+mysql -h 10.0.116.184 -P 3307 -u maaps -p maaps < sql/sample_data_maaps.sql
+mysql -h 10.0.116.184 -P 3307 -u maaps -p maaps < sql/distributed_drop_cross_shard_fks.sql
+mysql -h 10.0.116.184 -P 3307 -u maaps -p maaps < sql/distributed_shard0_filter.sql
+```
+
+Quick verification (run on each shard after setup):
+
+```sql
+SELECT @@hostname;
+SELECT COUNT(*) AS MemberCount  FROM Member;
+SELECT COUNT(*) AS PostCount    FROM Post;
+SELECT COUNT(*) AS CommentCount FROM Comment;
+```
+
 ---
 
 ## Sub-task 3: Implement Query Routing
@@ -131,6 +230,27 @@ all_shard_tables(table)           # → ["shard_0_post", "shard_1_post", "shard_
 
 All application routing logic imports from this single module so that the shard function (`MemberID % NUM_SHARDS`) is defined once and easy to change.
 
+### Distributed Routing Configuration
+
+Routing now supports both modes:
+
+1. Local simulated shard-table mode (single DB instance with `shard_*_*` tables)
+2. Remote distributed shard-node mode (separate MySQL instances on ports `3307/3308/3309`)
+
+Enable distributed routing with environment variables:
+
+```bash
+USE_DISTRIBUTED_SHARDS=1
+SHARD_HOST=10.0.116.184
+SHARD_DB=maaps
+SHARD_PORTS=3307,3308,3309
+DB_USER=maaps
+DB_PASSWORD=password@123
+```
+
+In distributed mode, queries are executed against the shard node selected by `get_shard_id(MemberID)`.
+Fan-out queries execute on all shard nodes and merge results in application code.
+
 ### New API Endpoints
 
 The following shard-aware endpoints are added to `app/main.py` under the `/shards/` prefix:
@@ -144,6 +264,9 @@ The following shard-aware endpoints are added to `app/main.py` under the `/shard
 | `/shards/posts` | GET | Fan-out (range) | Fetches public posts from all shards, merges and sorts |
 | `/shards/posts` | POST | Routed insert | Creates post in canonical table + routes insert to correct shard |
 
+In distributed mode, canonical `Member`, `Post`, and `Comment` tables on each shard node are treated as that node's local partition.
+In local mode, `shard_*_*` tables are used.
+
 #### Single-key lookup example (MemberID = 1)
 ```
 shard_id = 1 % 3 = 1  →  query goes to shard_1_member
@@ -153,8 +276,19 @@ shard_id = 1 % 3 = 1  →  query goes to shard_1_member
 All three `shard_*_post` tables are queried in parallel via fan-out, results are merged and sorted by `PostDate DESC`.
 
 #### Insert routing (POST /shards/posts)
-1. Insert into canonical `Post` table (for transactional consistency)
-2. Mirror insert into `shard_{N}_post` where `N = member_id % 3`
+1. Compute `N = member_id % 3`
+2. Open transaction on shard node `N`
+3. Insert into that node's local `Post` table
+
+### Assignment 2 Endpoint Routing Updates
+
+Beyond `/shards/*`, core Assignment 2 member/post/comment API paths were updated to use shard-aware execution:
+
+- Single-member lookups and member-centric operations route by `MemberID`
+- Post/comment point operations first resolve owning shard, then execute on that shard
+- Range/feed/search fan out across all shard nodes, then merge/sort/limit in app layer
+
+This satisfies Sub-task 3 requirements for lookup routing, insert routing, and range-query fan-out in both simulated and distributed environments.
 
 ---
 
