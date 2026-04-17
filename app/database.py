@@ -5,10 +5,10 @@ import pymysql
 from pymysql.cursors import DictCursor
 
 # Database configuration - in a real app, use environment variables
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
-DB_NAME = os.getenv("DB_NAME", "college_social_media")
+DB_HOST = os.getenv("DB_HOST", "10.0.116.184")
+DB_USER = os.getenv("DB_USER", "maaps")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "password@123")
+DB_NAME = os.getenv("DB_NAME", "maaps")
 
 
 def _env_flag(name: str, default: str = "0") -> bool:

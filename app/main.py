@@ -331,13 +331,39 @@ def health_check(_: dict = Depends(verify_session_token)):
 @app.post("/login")
 def login(request: LoginRequest):
     """Authenticates a user and returns a session token."""
+    username = request.username.strip()
     query = """
         SELECT m.MemberID, m.Email, m.Role, m.Name, a.PasswordHash 
         FROM Member m
         JOIN AuthCredential a ON m.MemberID = a.MemberID
         WHERE m.Email = %s
     """
-    user_record = execute_query(query, (request.username.strip(),), fetchone=True)
+    if is_distributed_shards_enabled():
+        user_record = None
+        for shard_id in ALL_SHARDS:
+            try:
+                row = execute_query_on_shard(shard_id, query, (username,), fetchone=True)
+            except DatabaseQueryError:
+                continue
+            if row:
+                user_record = row
+                break
+    else:
+        try:
+            user_record = execute_query(query, (username,), fetchone=True)
+        except DatabaseQueryError:
+            # Fallback for shard-only environments where no base DB is exposed on 3306.
+            user_record = None
+            for shard_id in ALL_SHARDS:
+                try:
+                    row = execute_query_on_shard(shard_id, query, (username,), fetchone=True)
+                except DatabaseQueryError:
+                    continue
+                if row:
+                    user_record = row
+                    break
+            if user_record is None:
+                raise
     
     if not user_record:
         raise HTTPException(status_code=401, detail="Invalid username or password")
