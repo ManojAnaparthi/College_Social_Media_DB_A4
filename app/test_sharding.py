@@ -6,7 +6,7 @@ from shard_router import ALL_SHARDS, NUM_SHARDS, all_shard_tables, get_shard_id,
 
 class TestShardRouterFunctions(unittest.TestCase):
     def test_get_shard_id_for_first_20_members(self):
-        expected = {0: 6, 1: 7, 2: 7}
+        expected = {0: 9, 1: 7, 2: 4}
         counts = {0: 0, 1: 0, 2: 0}
 
         for member_id in range(1, 21):
@@ -17,9 +17,9 @@ class TestShardRouterFunctions(unittest.TestCase):
         self.assertEqual(counts, expected)
 
     def test_get_shard_table(self):
-        self.assertEqual(get_shard_table("member", 1), "shard_1_member")
-        self.assertEqual(get_shard_table("post", 3), "shard_0_post")
-        self.assertEqual(get_shard_table("comment", 20), "shard_2_comment")
+        self.assertEqual(get_shard_table("member", 1), "shard_2_member")
+        self.assertEqual(get_shard_table("post", 3), "shard_1_post")
+        self.assertEqual(get_shard_table("comment", 20), "shard_0_comment")
         self.assertEqual(get_shard_table("MeMbEr", 4), "shard_1_member")
 
     def test_all_shard_tables(self):
@@ -58,7 +58,8 @@ class TestShardDatabaseIntegrity(unittest.TestCase):
             shard_total += shard_count
 
             expected_by_hash = self._fetch_scalar(
-                f"SELECT COUNT(*) FROM {base_table} WHERE ({key_column} %% {NUM_SHARDS}) = %s",
+                f"SELECT COUNT(*) FROM {base_table} "
+                f"WHERE MOD(CRC32(CAST({key_column} AS CHAR)), {NUM_SHARDS}) = %s",
                 (shard_id,),
             )
             self.assertEqual(

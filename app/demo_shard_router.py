@@ -21,7 +21,7 @@ class DemoShardRouterTests(unittest.TestCase):
     """Router-only tests; intentionally avoids DB imports/dependencies."""
 
     def test_get_shard_id_for_first_20_members(self):
-        expected = {0: 6, 1: 7, 2: 7}
+        expected = {0: 9, 1: 7, 2: 4}
         counts = {0: 0, 1: 0, 2: 0}
 
         for member_id in range(1, 21):
@@ -32,9 +32,9 @@ class DemoShardRouterTests(unittest.TestCase):
         self.assertEqual(counts, expected)
 
     def test_get_shard_table(self):
-        self.assertEqual(get_shard_table("member", 1), "shard_1_member")
-        self.assertEqual(get_shard_table("post", 3), "shard_0_post")
-        self.assertEqual(get_shard_table("comment", 20), "shard_2_comment")
+        self.assertEqual(get_shard_table("member", 1), "shard_2_member")
+        self.assertEqual(get_shard_table("post", 3), "shard_1_post")
+        self.assertEqual(get_shard_table("comment", 20), "shard_0_comment")
         self.assertEqual(get_shard_table("MeMbEr", 4), "shard_1_member")
 
     def test_all_shard_tables(self):
@@ -64,10 +64,10 @@ def run_router_tests() -> bool:
 def print_routing_demo() -> None:
     print("\n" + "=" * 72)
     print("STEP 2: Visual shard routing demo for MemberID 1..20")
-    print("Rule: shard_id = MemberID % NUM_SHARDS, where NUM_SHARDS = 3")
+    print("Rule: shard_id = CRC32(str(MemberID)) % NUM_SHARDS, where NUM_SHARDS = 3")
     print("=" * 72)
 
-    header = f"{'MemberID':>8}  {'MemberID % 3':>12}  {'Member Table':>18}  {'Post Table':>15}  {'Comment Table':>18}"
+    header = f"{'MemberID':>8}  {'Hash % 3':>12}  {'Member Table':>18}  {'Post Table':>15}  {'Comment Table':>18}"
     print(header)
     print("-" * len(header))
 
@@ -87,7 +87,7 @@ def print_routing_demo() -> None:
 
     print("\n" + "=" * 72)
     print("STEP 3: Distribution summary for MemberID 1..20")
-    print("Expected: shard_0 -> 6, shard_1 -> 7, shard_2 -> 7")
+    print("Expected: shard_0 -> 9, shard_1 -> 7, shard_2 -> 4")
     print("=" * 72)
     for shard_id in ALL_SHARDS:
         print(f"shard_{shard_id}: {counts[shard_id]} members")

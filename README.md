@@ -21,7 +21,7 @@ This assignment extends Assignment 1 (schema), Assignment 2 (APIs/indexing), and
 Shard function:
 
 ```text
-shard_id = MemberID % 3
+shard_id = CRC32(str(MemberID)) % 3
 ```
 
 3. Sharded entities: `Member`, `Post`, `Comment`
@@ -55,7 +55,7 @@ shard_id = MemberID % 3
 
 ### 4.3 Strategy Choice
 
-Hash-based sharding (`MemberID % 3`) was chosen for deterministic routing and good balance over time.
+Hash-based sharding (`CRC32(str(MemberID)) % 3`) was chosen for deterministic routing and good balance over time.
 
 ### 4.4 Skew Risks
 
@@ -93,19 +93,19 @@ Apply setup to each shard:
 ```powershell
 Set-Location ".\sql"
 
-# Shard 1 (port 3308): keep MemberID % 3 = 1
+# Shard 1 (port 3308): keep CRC32(str(MemberID)) % 3 = 1
 mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "source schema_maaps_no_triggers.sql"
 mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "source sample_data_maaps.sql"
 mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "source distributed_drop_cross_shard_fks.sql"
 mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "source distributed_shard1_filter.sql"
 
-# Shard 2 (port 3309): keep MemberID % 3 = 2
+# Shard 2 (port 3309): keep CRC32(str(MemberID)) % 3 = 2
 mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "source schema_maaps_no_triggers.sql"
 mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "source sample_data_maaps.sql"
 mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "source distributed_drop_cross_shard_fks.sql"
 mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "source distributed_shard2_filter.sql"
 
-# Shard 0 (port 3307): keep MemberID % 3 = 0
+# Shard 0 (port 3307): keep CRC32(str(MemberID)) % 3 = 0
 mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "source schema_maaps_no_triggers.sql"
 mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "source sample_data_maaps.sql"
 mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "source distributed_drop_cross_shard_fks.sql"
@@ -127,14 +127,14 @@ mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "SELECT @@hostname; SELECT COUNT
 Purity checks (must all be `0`):
 
 ```powershell
-# 3307 should contain only MemberID % 3 = 0
-mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "SELECT COUNT(*) AS bad_members FROM Member WHERE MemberID % 3 <> 0; SELECT COUNT(*) AS bad_posts FROM Post WHERE MemberID % 3 <> 0; SELECT COUNT(*) AS bad_comments FROM Comment WHERE MemberID % 3 <> 0;"
+# 3307 should contain only CRC32(str(MemberID)) % 3 = 0
+mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "SELECT COUNT(*) AS bad_members FROM Member WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 0; SELECT COUNT(*) AS bad_posts FROM Post WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 0; SELECT COUNT(*) AS bad_comments FROM Comment WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 0;"
 
-# 3308 should contain only MemberID % 3 = 1
-mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "SELECT COUNT(*) AS bad_members FROM Member WHERE MemberID % 3 <> 1; SELECT COUNT(*) AS bad_posts FROM Post WHERE MemberID % 3 <> 1; SELECT COUNT(*) AS bad_comments FROM Comment WHERE MemberID % 3 <> 1;"
+# 3308 should contain only CRC32(str(MemberID)) % 3 = 1
+mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "SELECT COUNT(*) AS bad_members FROM Member WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 1; SELECT COUNT(*) AS bad_posts FROM Post WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 1; SELECT COUNT(*) AS bad_comments FROM Comment WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 1;"
 
-# 3309 should contain only MemberID % 3 = 2
-mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "SELECT COUNT(*) AS bad_members FROM Member WHERE MemberID % 3 <> 2; SELECT COUNT(*) AS bad_posts FROM Post WHERE MemberID % 3 <> 2; SELECT COUNT(*) AS bad_comments FROM Comment WHERE MemberID % 3 <> 2;"
+# 3309 should contain only CRC32(str(MemberID)) % 3 = 2
+mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "SELECT COUNT(*) AS bad_members FROM Member WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 2; SELECT COUNT(*) AS bad_posts FROM Post WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 2; SELECT COUNT(*) AS bad_comments FROM Comment WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 2;"
 ```
 
 ## 6. Subtask 3: Query Routing
@@ -176,7 +176,7 @@ http://127.0.0.1:8001/
 1. Login and capture `session_token`.
 2. Call `GET /isAuth` and note member id `M`.
 3. Call `GET /shards/members/M`.
-   - Expected: `shard_id = M % 3`
+   - Expected: `shard_id = CRC32(str(M)) % 3`
 4. Call `POST /shards/posts` and note `post_id = P` and returned shard id.
    - Verify `P` exists on exactly one shard.
 5. Call `GET /shards/posts?limit=10`.
@@ -211,4 +211,3 @@ Include the following in your report:
    - Explain behavior when the app can reach some shards but not all.
 5. Observations and limitations
    - Mention fan-out query cost and operational complexity.
-

@@ -1,9 +1,9 @@
 USE maaps;
 
--- Keep only shard 2 records: MemberID % 3 = 2
-DELETE FROM Comment WHERE (MemberID % 3) <> 2;
-DELETE FROM Post    WHERE (MemberID % 3) <> 2;
-DELETE FROM Member  WHERE (MemberID % 3) <> 2;
+-- Keep only shard 2 records: CRC32(str(MemberID)) % 3 = 2
+DELETE FROM Comment WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 2;
+DELETE FROM Post    WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 2;
+DELETE FROM Member  WHERE MOD(CRC32(CAST(MemberID AS CHAR)), 3) <> 2;
 
 -- Verification
 SELECT 'Member' AS TableName, COUNT(*) AS RowCount FROM Member

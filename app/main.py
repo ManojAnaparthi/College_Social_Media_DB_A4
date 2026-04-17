@@ -1762,7 +1762,8 @@ def get_db_change_log(
 # ============================================================================
 # Sub-Task 3: Shard-Aware API Endpoints (Assignment 4)
 # All routes under /shards/* route queries to the correct shard table based
-# on the MemberID shard key using hash-based routing: shard_id = MemberID % 3
+# on the MemberID shard key using hash-based routing:
+# shard_id = CRC32(str(MemberID)) % 3
 # ============================================================================
 
 

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- CS 432 Assignment 4 – Sub-Task 2: Data Partitioning (Sharding)
--- Strategy : Hash-based sharding — shard_id = MemberID % 3
+-- Strategy : Hash-based sharding — shard_id = CRC32(str(MemberID)) % 3
 -- Tables   : Member, Post, Comment  (the three tables most frequently
 --             touched by Assignment 2 API endpoints)
 -- Shards   : shard_0_*, shard_1_*, shard_2_*
@@ -107,7 +107,7 @@ ALTER TABLE shard_2_comment MODIFY ShardID TINYINT NOT NULL DEFAULT 2;
 
 -- ============================================================================
 -- STEP 5: Migrate Member data into the correct shard
---         shard_id = MemberID % 3
+--         shard_id = CRC32(str(MemberID)) % 3
 -- ============================================================================
 
 INSERT INTO shard_0_member (MemberID, Name, Email, ContactNumber, Image, CollegeID,
@@ -115,21 +115,21 @@ INSERT INTO shard_0_member (MemberID, Name, Email, ContactNumber, Image, College
 SELECT MemberID, Name, Email, ContactNumber, Image, CollegeID,
        Role, Department, Age, IsVerified, JoinDate, LastLogin, Bio
 FROM   Member
-WHERE  (MemberID % 3) = 0;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 0;
 
 INSERT INTO shard_1_member (MemberID, Name, Email, ContactNumber, Image, CollegeID,
                              Role, Department, Age, IsVerified, JoinDate, LastLogin, Bio)
 SELECT MemberID, Name, Email, ContactNumber, Image, CollegeID,
        Role, Department, Age, IsVerified, JoinDate, LastLogin, Bio
 FROM   Member
-WHERE  (MemberID % 3) = 1;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 1;
 
 INSERT INTO shard_2_member (MemberID, Name, Email, ContactNumber, Image, CollegeID,
                              Role, Department, Age, IsVerified, JoinDate, LastLogin, Bio)
 SELECT MemberID, Name, Email, ContactNumber, Image, CollegeID,
        Role, Department, Age, IsVerified, JoinDate, LastLogin, Bio
 FROM   Member
-WHERE  (MemberID % 3) = 2;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 2;
 
 -- ============================================================================
 -- STEP 6: Migrate Post data into the correct shard
@@ -140,21 +140,21 @@ INSERT INTO shard_0_post (PostID, MemberID, Content, MediaURL, MediaType,
 SELECT PostID, MemberID, Content, MediaURL, MediaType,
        PostDate, LastEditDate, Visibility, IsActive, LikeCount, CommentCount
 FROM   Post
-WHERE  (MemberID % 3) = 0;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 0;
 
 INSERT INTO shard_1_post (PostID, MemberID, Content, MediaURL, MediaType,
                            PostDate, LastEditDate, Visibility, IsActive, LikeCount, CommentCount)
 SELECT PostID, MemberID, Content, MediaURL, MediaType,
        PostDate, LastEditDate, Visibility, IsActive, LikeCount, CommentCount
 FROM   Post
-WHERE  (MemberID % 3) = 1;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 1;
 
 INSERT INTO shard_2_post (PostID, MemberID, Content, MediaURL, MediaType,
                            PostDate, LastEditDate, Visibility, IsActive, LikeCount, CommentCount)
 SELECT PostID, MemberID, Content, MediaURL, MediaType,
        PostDate, LastEditDate, Visibility, IsActive, LikeCount, CommentCount
 FROM   Post
-WHERE  (MemberID % 3) = 2;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 2;
 
 -- ============================================================================
 -- STEP 7: Migrate Comment data into the correct shard
@@ -165,21 +165,21 @@ INSERT INTO shard_0_comment (CommentID, PostID, MemberID, Content,
 SELECT CommentID, PostID, MemberID, Content,
        CommentDate, LastEditDate, IsActive, LikeCount
 FROM   Comment
-WHERE  (MemberID % 3) = 0;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 0;
 
 INSERT INTO shard_1_comment (CommentID, PostID, MemberID, Content,
                               CommentDate, LastEditDate, IsActive, LikeCount)
 SELECT CommentID, PostID, MemberID, Content,
        CommentDate, LastEditDate, IsActive, LikeCount
 FROM   Comment
-WHERE  (MemberID % 3) = 1;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 1;
 
 INSERT INTO shard_2_comment (CommentID, PostID, MemberID, Content,
                               CommentDate, LastEditDate, IsActive, LikeCount)
 SELECT CommentID, PostID, MemberID, Content,
        CommentDate, LastEditDate, IsActive, LikeCount
 FROM   Comment
-WHERE  (MemberID % 3) = 2;
+WHERE  MOD(CRC32(CAST(MemberID AS CHAR)), 3) = 2;
 
 -- ============================================================================
 -- STEP 8: Verification – confirm total row counts match source tables
