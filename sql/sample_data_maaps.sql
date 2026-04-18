@@ -4,7 +4,9 @@
 -- ============================================================================
 
 -- ============================================================================
--- Insert Sample Data into Member Table (20 rows)
+-- Insert Sample Data into Member Table
+-- Base: 20 curated rows (below)
+-- Extension: auto-generated rows up to MemberID 500 (near end of file)
 -- ============================================================================
 USE maaps;
 
@@ -31,7 +33,9 @@ INSERT INTO Member (Name, Email, ContactNumber, Image, CollegeID, Role, Departme
 ('Kavya Krishnan', 'kavya.krishnan@iitgn.ac.in', '9876543229', 'kavya.jpg', 'IITGN2024017', 'Student', 'Computer Science', 18, TRUE, 'CS freshman | AI/ML | Competitive programmer');
 
 -- ============================================================================
--- Insert Sample Data into AuthCredential Table (20 rows)
+-- Insert Sample Data into AuthCredential Table
+-- Base: credentials for 20 curated users (below)
+-- Extension: credentials for auto-generated users up to MemberID 500 (near end)
 -- NOTE: Sample credentials are bcrypt hashes for password123.
 -- ============================================================================
 INSERT INTO AuthCredential (MemberID, PasswordHash) VALUES
@@ -258,6 +262,69 @@ INSERT INTO ActivityLog (MemberID, ActivityType, Details, IPAddress, `Timestamp`
 (10, 'Login', 'User logged in successfully', '192.168.1.110', '2026-02-04 07:15:00'),
 (10, 'Post', 'Announced ICML paper acceptance', '192.168.1.110', '2026-02-04 08:00:00'),
 (1, 'Logout', 'User logged out', '192.168.1.101', '2026-02-04 18:00:00');
+
+-- ============================================================================
+-- Extend Member/AuthCredential to MemberID 500 for sharding evaluation
+-- Keeps the first 20 curated users unchanged and appends deterministic users.
+-- ============================================================================
+INSERT INTO Member (
+	Name,
+	Email,
+	ContactNumber,
+	Image,
+	CollegeID,
+	Role,
+	Department,
+	Age,
+	IsVerified,
+	Bio
+)
+SELECT
+	CONCAT('Sample User ', gen.n),
+	CONCAT('sample.user', gen.n, '@iitgn.ac.in'),
+	CONCAT('900', LPAD(gen.n, 7, '0')),
+	'default_avatar.jpg',
+	CONCAT('IITGNX', LPAD(gen.n, 6, '0')),
+	'Student',
+	ELT((gen.n % 5) + 1, 'Computer Science', 'Electrical Engineering', 'Mechanical Engineering', 'Chemical Engineering', 'Civil Engineering'),
+	18 + (gen.n % 7),
+	TRUE,
+	CONCAT('Auto-generated sample member ', gen.n, ' for sharding validation')
+FROM (
+	SELECT n
+	FROM (
+		SELECT ones.d + (10 * tens.d) + (100 * hundreds.d) + 1 AS n
+		FROM (
+			SELECT 0 AS d UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+			UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+		) ones
+		CROSS JOIN (
+			SELECT 0 AS d UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+			UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+		) tens
+		CROSS JOIN (
+			SELECT 0 AS d UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+		) hundreds
+	) seq
+	WHERE n BETWEEN 21 AND 500
+) gen
+WHERE NOT EXISTS (
+	SELECT 1
+	FROM Member m
+	WHERE m.Email = CONCAT('sample.user', gen.n, '@iitgn.ac.in')
+);
+
+INSERT INTO AuthCredential (MemberID, PasswordHash)
+SELECT
+	m.MemberID,
+	'$2b$12$ZlrjAqIhjysU8/Z2DSHfceI56lty5MluK3gvjNdSvPkRTe.Yh3.D.'
+FROM Member m
+WHERE m.Email LIKE 'sample.user%@iitgn.ac.in'
+  AND NOT EXISTS (
+	  SELECT 1
+	  FROM AuthCredential a
+	  WHERE a.MemberID = m.MemberID
+  );
 
 -- ============================================================================
 -- End of Sample Data

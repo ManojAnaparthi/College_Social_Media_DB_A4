@@ -28,6 +28,7 @@ shard_id = CRC32(str(MemberID)) % 3
 4. Modes supported:
    - Local simulated shard tables (`shard_0_*`, `shard_1_*`, `shard_2_*`)
    - Remote distributed shard nodes (ports `3307`, `3308`, `3309`)
+5. Current seeded member range for sharding validation: `MemberID 1..500`
 
 ## 3. Relevant Files
 
@@ -114,6 +115,16 @@ mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "source distributed_shard0_filte
 Set-Location ".."
 ```
 
+Dataset note:
+
+1. `sample_data_maaps.sql` now seeds Member IDs up to `500`.
+2. IDs `1..20` are curated sample users.
+3. IDs `21..500` are auto-generated for larger sharding validation.
+4. Observed member distribution after shard filtering for `CRC32(str(MemberID)) % 3` over `1..500`:
+   - shard_0: `166`
+   - shard_1: `178`
+   - shard_2: `156`
+
 ### 5.3 Partition Verification Queries
 
 Counts per shard:
@@ -193,7 +204,7 @@ Cross-check inserted post placement:
 
 ```powershell
 # Use the numeric post_id returned by POST /shards/posts
-$P = 20
+$P = 21  # example value; replace with your returned post_id
 
 mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "SELECT PostID, MemberID FROM Post WHERE PostID = $P;"
 mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "SELECT PostID, MemberID FROM Post WHERE PostID = $P;"
