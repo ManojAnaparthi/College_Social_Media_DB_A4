@@ -1949,6 +1949,75 @@ def shard_list_all_posts(
     }
 
 
+@app.get("/shards/posts/range")
+def shard_list_posts_in_range(
+    start: datetime.datetime = Query(..., description="Inclusive ISO timestamp, e.g. 2026-01-01T00:00:00"),
+    end: datetime.datetime = Query(..., description="Inclusive ISO timestamp, e.g. 2026-12-31T23:59:59"),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: dict = Depends(verify_session_token),
+):
+    """
+    Explicit range query routing: fan-out to every shard that may contain
+    matching posts, then merge and globally sort the combined result.
+    """
+    if current_user.get("member_id") is None:
+        raise HTTPException(status_code=401, detail="Invalid session payload")
+    if start > end:
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    all_posts = []
+    shard_meta = []
+    for shard_id in ALL_SHARDS:
+        if is_distributed_shards_enabled():
+            shard_table = "Post"
+            rows = execute_query_on_shard(
+                shard_id,
+                """
+                SELECT PostID, MemberID, Content, MediaURL, MediaType,
+                       PostDate, Visibility, LikeCount, CommentCount, IsActive
+                FROM Post
+                WHERE IsActive = TRUE
+                  AND Visibility = 'Public'
+                  AND PostDate BETWEEN %s AND %s
+                ORDER BY PostDate DESC
+                LIMIT %s
+                """,
+                (start, end, limit),
+                fetchall=True,
+            )
+        else:
+            shard_table = f"shard_{shard_id}_post"
+            rows = execute_query(
+                f"""
+                SELECT PostID, MemberID, Content, MediaURL, MediaType,
+                       PostDate, Visibility, LikeCount, CommentCount, IsActive, ShardID
+                FROM   {shard_table}
+                WHERE  IsActive = TRUE
+                  AND  Visibility = 'Public'
+                  AND  PostDate BETWEEN %s AND %s
+                ORDER  BY PostDate DESC
+                LIMIT  %s
+                """,
+                (start, end, limit),
+                fetchall=True,
+            )
+
+        shard_meta.append({"shard_id": shard_id, "rows_fetched_from_shard": len(rows)})
+        all_posts.extend(rows)
+
+    all_posts.sort(key=lambda p: (p["PostDate"], p["PostID"]), reverse=True)
+    merged = all_posts[:limit]
+
+    return {
+        "message": "Posts retrieved via range fan-out across all shards",
+        "start": start,
+        "end": end,
+        "shard_meta": shard_meta,
+        "count": len(merged),
+        "data": merged,
+    }
+
+
 class ShardPostCreate(BaseModel):
     content: str
     media_url: str | None = None

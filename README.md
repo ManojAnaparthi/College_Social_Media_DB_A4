@@ -168,8 +168,9 @@ http://127.0.0.1:8001/
 2. `GET /shards/members/{member_id}`
 3. `GET /shards/members/{member_id}/posts`
 4. `GET /shards/members/{member_id}/comments`
-5. `GET /shards/posts` (fan-out range query)
-6. `POST /shards/posts` (routed insert)
+5. `GET /shards/posts` (fan-out global feed query)
+6. `GET /shards/posts/range` (fan-out date range query)
+7. `POST /shards/posts` (routed insert)
 
 ### 6.3 Routing Verification Procedure
 
@@ -181,10 +182,12 @@ http://127.0.0.1:8001/
    - Verify `P` exists on exactly one shard.
 5. Call `GET /shards/posts?limit=10`.
    - Expected: `shard_meta` contains 3 entries.
-6. Optional strong proof:
+6. Call `GET /shards/posts/range?start=2026-01-01T00:00:00&end=2026-12-31T23:59:59&limit=10`.
+   - Expected: `shard_meta` contains 3 entries and response is merged across shards.
+7. Optional strong proof:
    - Comment on a post from a different member.
    - Fetch `GET /posts/{post_id}/comments` and show the new comment appears.
-7. We have also verified these in the UI.
+8. We have also verified these in the UI.
 
 Cross-check inserted post placement:
 
@@ -196,6 +199,7 @@ mysql -h 10.0.116.184 -P 3307 -u maaps maaps -e "SELECT PostID, MemberID FROM Po
 mysql -h 10.0.116.184 -P 3308 -u maaps maaps -e "SELECT PostID, MemberID FROM Post WHERE PostID = $P;"
 mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "SELECT PostID, MemberID FROM Post WHERE PostID = $P;"
 ```
+
 ## 7. Subtask 4: Scalability and Trade-offs Analysis
 
 ### 7.1 Horizontal vs. Vertical Scaling
@@ -221,22 +225,21 @@ mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "SELECT PostID, MemberID FROM Po
 ### 7.2 Consistency: Where Operations Become Eventually Consistent
 
 **Consistency Model:**
+
 - **Within a Single Shard:** Strong consistency (ACID transactions).
 - **Across Multiple Shards:** Eventual consistency (data converges after latency period).
-
-**Example: Cross-Shard Operation**
-
-### 7.2 Consistency: Where Operations Become Eventually Consistent
 
 **Within a Shard:** Strong consistency (ACID).  
 **Across Shards:** Eventual consistency (~100ms staleness).
 
 **Real Example from Our App:** Member 5 (shard_0) posts a comment on a post by Member 2 (shard_2):
-1. `POST /shards/posts/{post_id}/comments` inserts comment to shard_2 → immediately saved
+
+1. `POST /posts/{post_id}/comments` inserts comment to shard_2 → immediately saved
 2. Shard_0 NOT updated with Member 5's activity
 3. Member 5's followers calling `GET /shards/members/5/posts` see the comment after ~100ms delay
 
 **Staleness in Our App:**
+
 - **Global Feed** (`GET /shards/posts`): New comments missing from feed temporarily
 - **Following Count** (`GET /shards/members/{id}`): Follower count not updated immediately across shards
 - **Search** (`GET /shards/posts?search=hello`): Newly created posts not searchable immediately
@@ -246,19 +249,23 @@ mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "SELECT PostID, MemberID FROM Po
 ### 7.3 Availability: Shard Failure Impact
 
 **If Shard 1 (port 3308) goes down:**
+
 - Member 5 (belongs to shard_1): `POST /shards/posts` → HTTP 500 error (33% of users affected) - cannot create posts, view their profile, or access any data
 - Member 3 (belongs to shard_0): `GET /shards/posts` → returns posts from only shard_0 and shard_2 (missing shard_1 posts) - gets incomplete feed silently
 
 **Availability Comparison:**
+
 - **Single Server Down:** 100% downtime for all users. No one can access platform at all.
 - **One Shard Down:** 33% of users cannot access service. 66% of users get partial data but service continues. Better than total failure but still significant impact.
 
 **Why This Happens:**
+
 - Hash function determines shard assignment: `CRC32(MemberID) % 3`
 - Members hashing to shard_1 have no fallback (no replication or failover implemented)
 - Global queries cannot skip missing shard without losing data accuracy
 
 **Mitigation Options (Not Implemented):**
+
 - Read replicas for each shard
 - Automatic failover to standby node
 - Data replication across shards
@@ -266,27 +273,31 @@ mysql -h 10.0.116.184 -P 3309 -u maaps maaps -e "SELECT PostID, MemberID FROM Po
 ### 7.4 Partition Tolerance: Network Split Between Shards
 
 **If network unreachable from app to Shard 0 (10.0.116.184:3307):**
+
 - Member 3 (routed to shard_0): `GET /shards/members/3/posts` → connection timeout (~10 seconds) then HTTP 500 error
 - Global query `GET /shards/posts` → returns only 66% of data (shard_1 and shard_2 results; shard_0 times out)
 - Application cannot distinguish: Is shard_0 dead? Network unreachable? Overloaded and slow?
 
 **Consistency Problem During Partition:**
+
 - If Member 3 writes to shard_0 before network split: `POST /shards/posts` succeeds, post stored
 - Then network partition occurs: Member 5 executes `GET /shards/posts` → doesn't see Member 3's post yet (not replicated to other shards)
 - When partition heals, Member 5 gets complete data, but consistency was broken temporarily (not eventual consistency)
 
 **Impact During Network Partition:**
+
 - Single-shard queries hitting unreachable shard: fail with timeout (~10 seconds latency before failure)
 - Global queries: return partial results (silent data loss) while waiting for timeout
 - Users on reachable shards still work but experience elevated latency waiting for unreachable shard timeouts
 
 **Why This Challenge Exists:**
+
 - CAP theorem: Cannot guarantee consistency, availability, AND partition tolerance simultaneously
 - Network failures in distributed systems require explicit health checks or heartbeats to detect
 - Current implementation uses implicit timeouts only, no explicit detection mechanism
 
-**Conclusion:** 
+**Conclusion:**
 
-The sharding trade-off is worthwhile for a growing social media platform. Single-user queries remain fast (10ms) and users primarily interact with their own data and friends' feeds. Global queries are slow (30ms), but they represent only ~10% of typical usage patterns—most queries are shard-specific (member's posts, followers, etc.). 
+The sharding trade-off is worthwhile for a growing social media platform. Single-user queries remain fast (10ms) and users primarily interact with their own data and friends' feeds. Global queries are slow (30ms), but they represent only ~10% of typical usage patterns—most queries are shard-specific (member's posts, followers, etc.).
 
 In exchange for this small latency cost on global operations, we gain 3x write capacity (150K writes/sec vs 50K), unlimited horizontal scalability, and fault isolation. When a shard fails, only 33% of users are affected instead of 100%. This is the optimal choice for platforms that prioritize growth and user-specific performance over globally-consistent real-time data.
